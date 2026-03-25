@@ -1,7 +1,7 @@
 {
   "name": "Speech to Text for Google Docs",
-  "description": "Dictate into Google Docs with speech recognition and paid access controls.",
-  "version": "1.0.0",
+  "description": "Dictate into Google Docs with speech recognition, free trial minutes, and paid plans.",
+  "version": "1.1.0",
   "manifest_version": 3,
   "background": {
     "service_worker": "background.js"
@@ -21,31 +21,17 @@
     }
   },
   "permissions": ["storage"],
+  "optional_permissions": ["activeTab"],
   "host_permissions": [
-    "*://*/*.pdf",
-    "*://*/*.PDF",
-    "file:///*",
-    "https://pdftext2speech.com/*",
-    "https://www.pdftext2speech.com/*"
+    "https://docs.google.com/*",
+    "https://your-domain.com/*",
+    "https://www.your-domain.com/*"
   ],
   "content_scripts": [
     {
-      "matches": [
-        "*://*/*.pdf",
-        "*://*/*.PDF",
-        "file:///*"
-      ],
-      "js": [
-        "vendor/pdfjs/pdf.min.js",
-        "contentScript.js"
-      ],
+      "matches": ["https://docs.google.com/document/*"],
+      "js": ["contentScript.js"],
       "run_at": "document_idle"
-    }
-  ],
-  "web_accessible_resources": [
-    {
-      "resources": ["vendor/pdfjs/pdf.worker.min.js"],
-      "matches": ["<all_urls>"]
     }
   ]
 }

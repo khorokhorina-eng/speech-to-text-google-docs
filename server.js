@@ -61,14 +61,14 @@ const PLAN_DEFINITIONS = [
   {
     id: "monthly",
     name: "Monthly plan",
-    description: "Unlimited playback and full access.",
+    description: "Speech-to-text access with 300 minutes each month.",
     stripePriceId: STRIPE_MONTHLY_PRICE_ID,
     includedMinutes: Math.max(1, Number(process.env.MONTHLY_MINUTES || 300)),
   },
   {
     id: "annual",
     name: "Annual plan",
-    description: "Unlimited playback and full access.",
+    description: "Speech-to-text access with 60 hours each year.",
     stripePriceId: STRIPE_ANNUAL_PRICE_ID,
     includedMinutes: Math.max(1, Number(process.env.ANNUAL_MINUTES || 3600)),
   },
@@ -967,6 +967,51 @@ async function handleStripeWebhook(req, res) {
   }
 }
 
+async function handleUsage(req, res, parsedUrl) {
+  let body;
+  try {
+    body = await parseJsonBody(req);
+  } catch (error) {
+    sendJson(res, 400, { error: error.message || "Invalid request body." });
+    return;
+  }
+
+  const deviceToken = getDeviceToken(req, parsedUrl, body);
+  if (!deviceToken) {
+    sendJson(res, 400, { error: "Missing device token." });
+    return;
+  }
+
+  const seconds = Math.max(0, Number(body.seconds) || 0);
+  const usageCost = Math.max(1, Math.ceil(seconds / 60));
+
+  const state = readState();
+  const account = getAccountForDevice(state, deviceToken);
+  const subscription = await lookupSubscriptionStatusForAccount(state, account);
+
+  if (!subscription.active) {
+    if (!deductDeviceMinutes(state, deviceToken, usageCost)) {
+      sendJson(res, 402, { error: "not-enough-queries" });
+      return;
+    }
+  } else if (!deductPaidMinutes(state, account, subscription, usageCost)) {
+    sendJson(res, 402, { error: "paid-plan-limit-reached" });
+    return;
+  }
+
+  writeState(state);
+  const usage = getOrCreateDeviceUsage(state, deviceToken);
+  const paidMinutesLeft = getPaidMinutesLeft(state, account, subscription);
+
+  sendJson(res, 200, {
+    ok: true,
+    paid: subscription.active,
+    subscriptionStatus: subscription.status || "none",
+    plan: subscription.plan?.planId || null,
+    minutesLeft: subscription.active ? paidMinutesLeft : usage.minutesLeft,
+  });
+}
+
 async function handleTts(req, res, parsedUrl) {
   if (!OPENAI_API_KEY) {
     sendJson(res, 500, { error: "OPENAI_API_KEY is not set." });
@@ -1144,6 +1189,11 @@ const server = http.createServer(async (req, res) => {
 
   if (req.method === "POST" && parsedUrl.pathname === "/tts") {
     await handleTts(req, res, parsedUrl);
+    return;
+  }
+
+  if (req.method === "POST" && parsedUrl.pathname === "/usage") {
+    await handleUsage(req, res, parsedUrl);
     return;
   }
 

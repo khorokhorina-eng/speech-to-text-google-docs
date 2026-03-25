@@ -1,11 +1,9 @@
 # FocusTrace Template Guide
 
-This project is both:
+This repository came from the shared paid-extension pattern and now serves as
+the live codebase for `Speech to Text for Google Docs`.
 
-- the live codebase for `PDF Text to Speech`
-- the template source for future paid Chrome extensions with the same structure
-
-The goal is to keep this product working while also reusing the same architecture for new products.
+Use the separate `pattern` repository if you want a clean base for another product.
 
 ## What Should Be Reused
 

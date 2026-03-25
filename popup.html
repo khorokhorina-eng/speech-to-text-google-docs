@@ -21,35 +21,45 @@
           <p id="status" class="status">Ready</p>
           <span class="live-dot" aria-hidden="true"></span>
         </div>
-        <p id="hint" class="hint">Use the extension inside Google Docs to start dictation.</p>
+        <p id="hint" class="hint">
+          Open a Google Docs document, click where you want text to appear, then start dictation.
+        </p>
       </section>
 
-      <input id="fileInput" class="hidden-input" type="file" accept=".pdf,application/pdf" />
-
-      <button id="openFile" class="file-btn">Open Product Demo File</button>
+      <section class="doc-panel">
+        <div class="doc-copy">
+          <p class="doc-label">Current document</p>
+          <p id="docTitle" class="doc-title">No active Google Docs tab</p>
+        </div>
+        <p id="quota" class="quota">5 free minutes included</p>
+      </section>
 
       <section class="controls-panel">
-        <button id="play" class="primary">Start Dictation</button>
+        <button id="start" class="primary">Start dictation</button>
         <div class="controls-row">
-          <button id="pause" class="secondary" disabled>Pause</button>
           <button id="stop" class="secondary" disabled>Stop</button>
-          <label class="speed">
-            <span class="speed-label">Speed</span>
-            <select id="speed" aria-label="Playback speed">
-              <option value="0.75">0.75x</option>
-              <option value="1" selected>1x</option>
-              <option value="1.25">1.25x</option>
-              <option value="1.5">1.5x</option>
+          <label class="language">
+            <span class="language-label">Language</span>
+            <select id="language" aria-label="Recognition language">
+              <option value="en-US" selected>English (US)</option>
+              <option value="en-GB">English (UK)</option>
+              <option value="tr-TR">Turkish</option>
+              <option value="de-DE">German</option>
+              <option value="es-ES">Spanish</option>
+              <option value="fr-FR">French</option>
+              <option value="it-IT">Italian</option>
+              <option value="pt-BR">Portuguese (Brazil)</option>
             </select>
           </label>
         </div>
       </section>
 
-      <button id="limitUpgrade" class="upgrade-btn hidden">Upgrade to continue listening</button>
-
-      <p class="mini-disclosure">
-        Product domain, privacy text, and backend endpoint still need to be replaced for this new product.
-      </p>
+      <section class="transcript-panel">
+        <p class="panel-label">Latest transcript</p>
+        <p id="transcript" class="transcript">
+          Dictated text will appear here while you speak.
+        </p>
+      </section>
 
       <section class="account-panel">
         <div class="account-copy">
@@ -60,14 +70,16 @@
       </section>
 
       <div class="footer-links">
+        <button id="pricingLink" class="link-btn">Pricing</button>
         <button id="contact" class="link-btn">Contact us</button>
       </div>
     </main>
+
     <section id="paywallModal" class="paywall-modal hidden">
       <div class="paywall-sheet">
         <div class="paywall-top">
           <div>
-            <p class="paywall-kicker">Listening plans</p>
+            <p class="paywall-kicker">Dictation plans</p>
             <h2 class="paywall-title">Choose your plan</h2>
           </div>
           <button id="closePaywall" class="paywall-close" aria-label="Close paywall">×</button>
@@ -77,7 +89,7 @@
           <div id="authCopy" class="auth-copy">
             <p class="auth-label">Sign in before checkout</p>
             <p id="authMessage" class="auth-message">
-              Use your 5 free minutes first. Sign in with Google when you want to buy a plan.
+              Use your free trial first. Sign in with Google when you want to buy a plan.
             </p>
           </div>
           <button id="authGoogle" class="auth-google">Continue with Google</button>
@@ -89,30 +101,29 @@
         <div id="paywallPlans" class="paywall-plans">
           <button class="plan-card selected" data-plan-id="monthly">
             <span class="plan-main">
-              <span class="plan-name">1-MONTH PLAN</span>
+              <span class="plan-name">MONTHLY</span>
               <span class="plan-total">$9.99 per month</span>
             </span>
             <span class="plan-side">
-              <span class="plan-day-price">$0.33</span>
-              <span class="plan-day-period">PER DAY</span>
+              <span class="plan-day-price">300</span>
+              <span class="plan-day-period">MIN / MONTH</span>
             </span>
           </button>
           <button class="plan-card featured" data-plan-id="annual">
-            <span class="plan-badge accent-badge">MOST POPULAR</span>
+            <span class="plan-badge accent-badge">BEST VALUE</span>
             <span class="plan-main">
-              <span class="plan-name">12-MONTH PLAN</span>
+              <span class="plan-name">ANNUAL</span>
               <span class="plan-total">$89.99 per year</span>
             </span>
             <span class="plan-side">
-              <span class="plan-day-price">$0.25</span>
-              <span class="plan-day-period">PER DAY</span>
+              <span class="plan-day-price">60</span>
+              <span class="plan-day-period">HOURS / YEAR</span>
             </span>
           </button>
         </div>
         <button id="continueCheckout" class="continue-btn">Continue</button>
       </div>
     </section>
-    <script src="vendor/pdfjs/pdf.min.js"></script>
     <script src="popup.js"></script>
   </body>
 </html>

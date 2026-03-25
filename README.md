@@ -6,19 +6,18 @@ Current status:
 
 - separate product repository is initialized
 - brand scaffold is set to `Speech to Text for Google Docs`
-- auth, paywall, quota, and Stripe template structure are present
-- vendored `pdfjs` assets are included in stable project paths
+- Google Docs dictation flow is implemented in the extension runtime
+- auth, paywall, quota, and Stripe structure are wired for this product
 
-This repository is not fully product-complete yet.
+This repository is product-specific, but still needs final deployment setup.
 
 Still required before launch:
 
-- implement the real Google Docs speech-to-text feature
-- replace inherited PDF-specific logic
 - set the final domain
 - set the final support email
 - configure product-specific Stripe prices
 - configure product-specific Google OAuth credentials
+- deploy the product backend and website
 - update all store copy and privacy text
 
 Key files:

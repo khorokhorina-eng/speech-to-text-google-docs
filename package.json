@@ -4,8 +4,8 @@
   "description": "Product scaffold for a Google Docs speech-to-text Chrome extension.",
   "main": "index.js",
   "scripts": {
-    "tts-proxy": "node server.js",
-    "tts-proxy:dev": "node server.js",
+    "backend": "node server.js",
+    "backend:dev": "node server.js",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "repository": {
@@ -20,7 +20,6 @@
   },
   "homepage": "",
   "dependencies": {
-    "pdfjs-dist": "^3.11.174",
     "stripe": "^20.4.0"
   }
 }

@@ -1,18 +1,10 @@
-const REMOTE_API_BASE_URL = "https://pdftext2speech.com";
-
-const TTS_ENDPOINTS = [
-  `${REMOTE_API_BASE_URL}/tts`,
-];
-
-const BILLING_ENDPOINTS = [
-  REMOTE_API_BASE_URL,
-];
-
+const REMOTE_API_BASE_URL = "https://your-domain.com";
+const BILLING_ENDPOINTS = [REMOTE_API_BASE_URL];
 const FREE_MINUTES = 5;
 const DEVICE_TOKEN_KEY = "deviceToken";
 const AUTH_SESSION_KEY = "authSession";
-
 const SUBSCRIPTION_CACHE_MS = 30 * 1000;
+
 let subscriptionCache = {
   deviceToken: "",
   active: false,
@@ -21,6 +13,8 @@ let subscriptionCache = {
   minutesLeft: FREE_MINUTES,
   timestamp: 0,
 };
+
+const tabStateCache = new Map();
 
 chrome.runtime.onInstalled.addListener((details) => {
   if (details.reason !== "install") {
@@ -44,25 +38,55 @@ function writeStorage(payload) {
   });
 }
 
-async function readUsageSeconds() {
-  return 0;
-}
-
-async function writeUsageSeconds(value) {
-  return value;
-}
-
 async function getOrCreateDeviceToken() {
   const result = await readStorage([DEVICE_TOKEN_KEY]);
   const existing = typeof result?.[DEVICE_TOKEN_KEY] === "string" ? result[DEVICE_TOKEN_KEY] : "";
   if (existing) {
     return existing;
   }
+
   const created =
     (self.crypto && self.crypto.randomUUID && self.crypto.randomUUID()) ||
     `device_${Date.now()}_${Math.random().toString(16).slice(2)}`;
   await writeStorage({ [DEVICE_TOKEN_KEY]: created });
   return created;
+}
+
+async function fetchJsonFromEndpoints(pathname, options = {}) {
+  const deviceToken = await getOrCreateDeviceToken();
+  let lastError = null;
+
+  for (const baseUrl of BILLING_ENDPOINTS) {
+    try {
+      const headers = {
+        ...(options.headers || {}),
+        "x-device-token": deviceToken,
+      };
+      const response = await fetch(`${baseUrl}${pathname}`, {
+        ...options,
+        headers,
+      });
+      const text = await response.text();
+      let data = {};
+      if (text) {
+        try {
+          data = JSON.parse(text);
+        } catch (_error) {
+          data = { raw: text };
+        }
+      }
+
+      if (!response.ok) {
+        throw new Error(data?.error || `Request failed with ${response.status}`);
+      }
+
+      return data;
+    } catch (error) {
+      lastError = error;
+    }
+  }
+
+  throw new Error(lastError?.message || "Remote billing server is unreachable.");
 }
 
 async function getAuthState() {
@@ -90,7 +114,7 @@ async function getAuthState() {
     return {
       signedIn: Boolean(email),
       email,
-      method: email ? cachedSession?.method || "email" : null,
+      method: email ? cachedSession?.method || "google" : null,
       signedInAt: cachedSession?.signedInAt || null,
       deviceToken,
     };
@@ -106,8 +130,9 @@ async function signOut() {
       body: JSON.stringify({ device_token: deviceToken }),
     });
   } catch (_error) {
-    // Clear local state even if the remote logout endpoint is not available.
+    // Clear local auth state even when the backend is unavailable.
   }
+
   await writeStorage({ [AUTH_SESSION_KEY]: null });
   return {
     signedIn: false,
@@ -129,41 +154,6 @@ async function startGoogleSignIn(returnUrl) {
   return { started: true, deviceToken };
 }
 
-async function fetchJsonFromEndpoints(pathname, options = {}) {
-  const deviceToken = await getOrCreateDeviceToken();
-  let lastError = null;
-
-  for (const baseUrl of BILLING_ENDPOINTS) {
-    try {
-      const headers = {
-        ...(options.headers || {}),
-        "x-device-token": deviceToken,
-      };
-      const response = await fetch(`${baseUrl}${pathname}`, {
-        ...options,
-        headers,
-      });
-      const text = await response.text();
-      let data = {};
-      if (text) {
-        try {
-          data = JSON.parse(text);
-        } catch (_error) {
-          data = { raw: text };
-        }
-      }
-      if (!response.ok) {
-        throw new Error(data?.error || `Request failed with ${response.status}`);
-      }
-      return data;
-    } catch (error) {
-      lastError = error;
-    }
-  }
-
-  throw new Error(lastError?.message || "Remote billing server is unreachable.");
-}
-
 async function getSubscriptionStatus(forceRefresh = false) {
   const deviceToken = await getOrCreateDeviceToken();
   const now = Date.now();
@@ -183,7 +173,6 @@ async function getSubscriptionStatus(forceRefresh = false) {
   }
 
   const data = await fetchJsonFromEndpoints("/me");
-
   subscriptionCache = {
     deviceToken,
     active: !!data.paid,
@@ -204,96 +193,51 @@ async function getSubscriptionStatus(forceRefresh = false) {
   };
 }
 
-async function getPlaybackQuota() {
+async function getDictationQuota() {
   const sub = await getSubscriptionStatus(false).catch(() => ({ active: false }));
   const minutesLeft = Number.isFinite(Number(sub.minutesLeft))
     ? Math.max(0, Number(sub.minutesLeft))
-    : sub.active
-    ? Number.MAX_SAFE_INTEGER
-    : 0;
-  const remainingSeconds = minutesLeft * 60;
-
-  if (sub.active) {
-    return {
-      usedSeconds: 0,
-      limitSeconds: remainingSeconds,
-      remainingSeconds,
-      isLimited: remainingSeconds <= 0,
-      isSubscribed: true,
-      subscriptionStatus: sub.status || "active",
-      plan: sub.plan || null,
-    };
-  }
+    : FREE_MINUTES;
 
   return {
     usedSeconds: 0,
-    limitSeconds: FREE_MINUTES * 60,
-    remainingSeconds,
-    isLimited: remainingSeconds <= 0,
-    isSubscribed: false,
-    subscriptionStatus: "none",
+    limitSeconds: minutesLeft * 60,
+    remainingSeconds: minutesLeft * 60,
+    isLimited: minutesLeft <= 0,
+    isSubscribed: !!sub.active,
+    subscriptionStatus: sub.status || "none",
     plan: sub.plan || null,
+    minutesLeft,
   };
 }
 
-async function addPlaybackUsage(rawSeconds) {
-  void rawSeconds;
-  return getPlaybackQuota();
-}
-
-async function fetchPdfBytes(url) {
-  const response = await fetch(url);
-  if (!response.ok) {
-    throw new Error(`Background fetch failed (${response.status}).`);
-  }
-  const buffer = await response.arrayBuffer();
-  return { bytes: Array.from(new Uint8Array(buffer)) };
-}
-
-async function synthesizeSpeech({ text, speed, language }) {
-  if (!text || typeof text !== "string") {
-    throw new Error("TTS text is empty.");
+async function addDictationUsage(seconds) {
+  const roundedSeconds = Math.max(0, Number(seconds) || 0);
+  if (!roundedSeconds) {
+    return getDictationQuota();
   }
 
-  const deviceToken = await getOrCreateDeviceToken();
-  let lastError = null;
-  for (const endpoint of TTS_ENDPOINTS) {
-    try {
-      const response = await fetch(endpoint, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "x-device-token": deviceToken,
-        },
-        body: JSON.stringify({ input: text, speed, language }),
-      });
+  const data = await fetchJsonFromEndpoints("/usage", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ seconds: roundedSeconds }),
+  });
 
-      if (!response.ok) {
-        const details = await response.text().catch(() => "");
-        throw new Error(
-          `Remote TTS returned ${response.status}${details ? `: ${details}` : ""}`
-        );
-      }
+  subscriptionCache.timestamp = 0;
 
-      const buffer = await response.arrayBuffer();
-      return {
-        bytes: Array.from(new Uint8Array(buffer)),
-        mimeType: response.headers.get("content-type") || "audio/mpeg",
-      };
-    } catch (error) {
-      lastError = error;
-    }
-  }
-
-  const message =
-    lastError && lastError.message
-      ? lastError.message
-      : "Unable to reach the remote TTS service.";
-  throw new Error(message);
+  return {
+    usedSeconds: roundedSeconds,
+    limitSeconds: Number(data.minutesLeft || 0) * 60,
+    remainingSeconds: Number(data.minutesLeft || 0) * 60,
+    isLimited: Number(data.minutesLeft || 0) <= 0,
+    isSubscribed: !!data.paid,
+    subscriptionStatus: data.subscriptionStatus || "none",
+    plan: data.plan ? { planId: data.plan } : null,
+    minutesLeft: Number(data.minutesLeft || 0),
+  };
 }
 
 async function createCheckoutSession(planId, returnUrl) {
-  void returnUrl;
   const deviceToken = await getOrCreateDeviceToken();
   const authState = await getAuthState();
 
@@ -307,8 +251,10 @@ async function createCheckoutSession(planId, returnUrl) {
     body: JSON.stringify({
       device_token: deviceToken,
       plan: planId,
+      return_url: returnUrl || "",
     }),
   });
+
   return {
     deviceToken,
     email: authState.email,
@@ -317,107 +263,220 @@ async function createCheckoutSession(planId, returnUrl) {
   };
 }
 
-chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+function getDefaultTabState() {
+  return {
+    connected: false,
+    supported: false,
+    isDocsPage: false,
+    status: "idle",
+    message: "Open a Google Doc and place the text cursor before starting dictation.",
+    transcript: "",
+    interimTranscript: "",
+    docTitle: "",
+    language: "en-US",
+    insertedChars: 0,
+    sessionSeconds: 0,
+  };
+}
+
+function queryActiveTab() {
+  return new Promise((resolve, reject) => {
+    chrome.tabs.query({ active: true, lastFocusedWindow: true }, (tabs) => {
+      if (chrome.runtime.lastError) {
+        reject(new Error(chrome.runtime.lastError.message));
+        return;
+      }
+      resolve(tabs?.[0] || null);
+    });
+  });
+}
+
+async function getActiveDocsTab() {
+  const tab = await queryActiveTab();
+  if (!tab?.id) {
+    throw new Error("No active tab found.");
+  }
+
+  const url = typeof tab.url === "string" ? tab.url : "";
+  if (!url.startsWith("https://docs.google.com/document/")) {
+    throw new Error("Open a Google Docs document first.");
+  }
+
+  return tab;
+}
+
+function sendMessageToTab(tabId, message) {
+  return new Promise((resolve, reject) => {
+    chrome.tabs.sendMessage(tabId, message, (response) => {
+      if (chrome.runtime.lastError) {
+        reject(new Error(chrome.runtime.lastError.message));
+        return;
+      }
+      if (!response?.ok) {
+        reject(new Error(response?.error || "Tab request failed."));
+        return;
+      }
+      resolve(response);
+    });
+  });
+}
+
+async function getDictationState() {
+  const tab = await queryActiveTab();
+  if (!tab?.id) {
+    return getDefaultTabState();
+  }
+
+  const defaultState = {
+    ...getDefaultTabState(),
+    isDocsPage: typeof tab.url === "string" && tab.url.startsWith("https://docs.google.com/document/"),
+    docTitle: tab.title || "",
+  };
+
+  if (!defaultState.isDocsPage) {
+    return defaultState;
+  }
+
+  try {
+    const response = await sendMessageToTab(tab.id, { type: "getDictationState" });
+    const nextState = {
+      ...defaultState,
+      ...response.state,
+      connected: true,
+      supported: response.state?.supported !== false,
+    };
+    tabStateCache.set(tab.id, nextState);
+    return nextState;
+  } catch (_error) {
+    const cached = tabStateCache.get(tab.id);
+    return cached
+      ? { ...defaultState, ...cached, connected: true }
+      : {
+          ...defaultState,
+          message: "Reload this Google Docs tab so the extension can connect.",
+          connected: false,
+        };
+  }
+}
+
+async function startDictation(payload = {}) {
+  const tab = await getActiveDocsTab();
+  const quota = await getDictationQuota();
+  if (quota.remainingSeconds <= 0) {
+    throw new Error("Free trial used. Upgrade to continue dictation.");
+  }
+
+  const response = await sendMessageToTab(tab.id, {
+    type: "startDictation",
+    language: typeof payload.language === "string" && payload.language.trim()
+      ? payload.language.trim()
+      : "en-US",
+  });
+
+  return {
+    tabId: tab.id,
+    ...response,
+    quota,
+  };
+}
+
+async function stopDictation() {
+  const tab = await getActiveDocsTab();
+  const response = await sendMessageToTab(tab.id, { type: "stopDictation" });
+  return {
+    tabId: tab.id,
+    ...response,
+  };
+}
+
+chrome.tabs.onRemoved.addListener((tabId) => {
+  tabStateCache.delete(tabId);
+});
+
+chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (!message?.type) {
     return false;
   }
 
-  if (message.type === "getPlaybackQuota") {
-    getPlaybackQuota()
-      .then((result) => sendResponse({ ok: true, ...result }))
-      .catch((error) => {
-        const errorMessage =
-          error && error.message ? error.message : "Failed to read quota.";
-        sendResponse({ ok: false, error: errorMessage });
+  if (message.type === "dictationStateUpdate") {
+    if (sender.tab?.id) {
+      tabStateCache.set(sender.tab.id, {
+        ...getDefaultTabState(),
+        ...(message.state || {}),
+        connected: true,
       });
+    }
+    sendResponse({ ok: true });
+    return false;
+  }
+
+  if (message.type === "getDictationQuota") {
+    getDictationQuota()
+      .then((result) => sendResponse({ ok: true, ...result }))
+      .catch((error) => sendResponse({ ok: false, error: error.message || "Failed to read quota." }));
     return true;
   }
 
-  if (message.type === "addPlaybackUsage") {
-    addPlaybackUsage(message.seconds)
+  if (message.type === "addDictationUsage") {
+    addDictationUsage(message.seconds)
       .then((result) => sendResponse({ ok: true, ...result }))
-      .catch((error) => {
-        const errorMessage =
-          error && error.message ? error.message : "Failed to save quota.";
-        sendResponse({ ok: false, error: errorMessage });
-      });
-    return true;
-  }
-
-  if (message.type === "createCheckoutSession") {
-    createCheckoutSession(message.planId, message.returnUrl)
-      .then((result) => sendResponse({ ok: true, ...result }))
-      .catch((error) => {
-        const errorMessage =
-          error && error.message ? error.message : "Failed to create checkout session.";
-        sendResponse({ ok: false, error: errorMessage });
-      });
+      .catch((error) => sendResponse({ ok: false, error: error.message || "Failed to save usage." }));
     return true;
   }
 
   if (message.type === "getAuthState") {
     getAuthState()
       .then((result) => sendResponse({ ok: true, ...result }))
-      .catch((error) => {
-        const errorMessage =
-          error && error.message ? error.message : "Failed to read auth state.";
-        sendResponse({ ok: false, error: errorMessage });
-      });
+      .catch((error) => sendResponse({ ok: false, error: error.message || "Failed to read auth state." }));
     return true;
   }
 
   if (message.type === "startGoogleSignIn") {
     startGoogleSignIn(message.returnUrl)
       .then((result) => sendResponse({ ok: true, ...result }))
-      .catch((error) => {
-        const errorMessage =
-          error && error.message ? error.message : "Failed to start Google sign-in.";
-        sendResponse({ ok: false, error: errorMessage });
-      });
+      .catch((error) => sendResponse({ ok: false, error: error.message || "Failed to start Google sign-in." }));
     return true;
   }
 
   if (message.type === "signOut") {
     signOut()
       .then((result) => sendResponse({ ok: true, ...result }))
-      .catch((error) => {
-        const errorMessage =
-          error && error.message ? error.message : "Failed to sign out.";
-        sendResponse({ ok: false, error: errorMessage });
-      });
+      .catch((error) => sendResponse({ ok: false, error: error.message || "Failed to sign out." }));
     return true;
   }
 
   if (message.type === "refreshSubscriptionStatus") {
     getSubscriptionStatus(true)
       .then((result) => sendResponse({ ok: true, ...result }))
-      .catch((error) => {
-        const errorMessage =
-          error && error.message ? error.message : "Failed to refresh subscription status.";
-        sendResponse({ ok: false, error: errorMessage });
-      });
+      .catch((error) => sendResponse({ ok: false, error: error.message || "Failed to refresh subscription status." }));
     return true;
   }
 
-  if (message.type === "fetchPdfBytes" && message.url) {
-    fetchPdfBytes(message.url)
+  if (message.type === "createCheckoutSession") {
+    createCheckoutSession(message.planId, message.returnUrl)
       .then((result) => sendResponse({ ok: true, ...result }))
-      .catch((error) => {
-        const errorMessage =
-          error && error.message ? error.message : "Background fetch failed.";
-        sendResponse({ ok: false, error: errorMessage });
-      });
+      .catch((error) => sendResponse({ ok: false, error: error.message || "Failed to create checkout session." }));
     return true;
   }
 
-  if (message.type === "synthesizeSpeech") {
-    synthesizeSpeech(message)
+  if (message.type === "getDictationState") {
+    getDictationState()
+      .then((result) => sendResponse({ ok: true, state: result }))
+      .catch((error) => sendResponse({ ok: false, error: error.message || "Failed to read dictation state." }));
+    return true;
+  }
+
+  if (message.type === "startDictation") {
+    startDictation(message)
       .then((result) => sendResponse({ ok: true, ...result }))
-      .catch((error) => {
-        const errorMessage =
-          error && error.message ? error.message : "TTS request failed.";
-        sendResponse({ ok: false, error: errorMessage });
-      });
+      .catch((error) => sendResponse({ ok: false, error: error.message || "Failed to start dictation." }));
+    return true;
+  }
+
+  if (message.type === "stopDictation") {
+    stopDictation()
+      .then((result) => sendResponse({ ok: true, ...result }))
+      .catch((error) => sendResponse({ ok: false, error: error.message || "Failed to stop dictation." }));
     return true;
   }
 
