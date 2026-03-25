@@ -1,0 +1,26 @@
+{
+  "name": "speech-to-text-for-google-docs",
+  "version": "1.0.0",
+  "description": "Product scaffold for a Google Docs speech-to-text Chrome extension.",
+  "main": "index.js",
+  "scripts": {
+    "tts-proxy": "node server.js",
+    "tts-proxy:dev": "node server.js",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": ""
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "bugs": {
+    "url": ""
+  },
+  "homepage": "",
+  "dependencies": {
+    "pdfjs-dist": "^3.11.174",
+    "stripe": "^20.4.0"
+  }
+}

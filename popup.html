@@ -1,0 +1,118 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Speech to Text for Google Docs</title>
+    <link rel="stylesheet" href="popup.css" />
+  </head>
+  <body>
+    <main class="container">
+      <section class="hero">
+        <div class="hero-copy">
+          <p class="eyebrow">Google Docs Dictation</p>
+          <h1 class="title">Speech to Text for Google Docs</h1>
+        </div>
+        <button id="upgrade" class="chip-btn">Get plan</button>
+      </section>
+
+      <section class="status-panel">
+        <div class="status-head">
+          <p id="status" class="status">Ready</p>
+          <span class="live-dot" aria-hidden="true"></span>
+        </div>
+        <p id="hint" class="hint">Use the extension inside Google Docs to start dictation.</p>
+      </section>
+
+      <input id="fileInput" class="hidden-input" type="file" accept=".pdf,application/pdf" />
+
+      <button id="openFile" class="file-btn">Open Product Demo File</button>
+
+      <section class="controls-panel">
+        <button id="play" class="primary">Start Dictation</button>
+        <div class="controls-row">
+          <button id="pause" class="secondary" disabled>Pause</button>
+          <button id="stop" class="secondary" disabled>Stop</button>
+          <label class="speed">
+            <span class="speed-label">Speed</span>
+            <select id="speed" aria-label="Playback speed">
+              <option value="0.75">0.75x</option>
+              <option value="1" selected>1x</option>
+              <option value="1.25">1.25x</option>
+              <option value="1.5">1.5x</option>
+            </select>
+          </label>
+        </div>
+      </section>
+
+      <button id="limitUpgrade" class="upgrade-btn hidden">Upgrade to continue listening</button>
+
+      <p class="mini-disclosure">
+        Product domain, privacy text, and backend endpoint still need to be replaced for this new product.
+      </p>
+
+      <section class="account-panel">
+        <div class="account-copy">
+          <p class="account-label">Account</p>
+          <p id="accountState" class="account-state">Not signed in</p>
+        </div>
+        <button id="accountAction" class="account-btn">Sign in</button>
+      </section>
+
+      <div class="footer-links">
+        <button id="contact" class="link-btn">Contact us</button>
+      </div>
+    </main>
+    <section id="paywallModal" class="paywall-modal hidden">
+      <div class="paywall-sheet">
+        <div class="paywall-top">
+          <div>
+            <p class="paywall-kicker">Listening plans</p>
+            <h2 class="paywall-title">Choose your plan</h2>
+          </div>
+          <button id="closePaywall" class="paywall-close" aria-label="Close paywall">×</button>
+        </div>
+        <p id="paywallStatus" class="paywall-status">Checking subscription status...</p>
+        <section class="auth-panel">
+          <div id="authCopy" class="auth-copy">
+            <p class="auth-label">Sign in before checkout</p>
+            <p id="authMessage" class="auth-message">
+              Use your 5 free minutes first. Sign in with Google when you want to buy a plan.
+            </p>
+          </div>
+          <button id="authGoogle" class="auth-google">Continue with Google</button>
+          <div id="authSignedIn" class="auth-signed-in hidden">
+            <p id="authSignedInText" class="auth-signed-in-text">Signed in as</p>
+            <button id="authSignOut" class="link-btn auth-signout">Sign out</button>
+          </div>
+        </section>
+        <div id="paywallPlans" class="paywall-plans">
+          <button class="plan-card selected" data-plan-id="monthly">
+            <span class="plan-main">
+              <span class="plan-name">1-MONTH PLAN</span>
+              <span class="plan-total">$9.99 per month</span>
+            </span>
+            <span class="plan-side">
+              <span class="plan-day-price">$0.33</span>
+              <span class="plan-day-period">PER DAY</span>
+            </span>
+          </button>
+          <button class="plan-card featured" data-plan-id="annual">
+            <span class="plan-badge accent-badge">MOST POPULAR</span>
+            <span class="plan-main">
+              <span class="plan-name">12-MONTH PLAN</span>
+              <span class="plan-total">$89.99 per year</span>
+            </span>
+            <span class="plan-side">
+              <span class="plan-day-price">$0.25</span>
+              <span class="plan-day-period">PER DAY</span>
+            </span>
+          </button>
+        </div>
+        <button id="continueCheckout" class="continue-btn">Continue</button>
+      </div>
+    </section>
+    <script src="vendor/pdfjs/pdf.min.js"></script>
+    <script src="popup.js"></script>
+  </body>
+</html>
