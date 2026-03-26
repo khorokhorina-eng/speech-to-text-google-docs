@@ -1,4 +1,4 @@
-const REMOTE_API_BASE_URL = "https://your-domain.com";
+const REMOTE_API_BASE_URL = "https://voicetext.world";
 const BILLING_ENDPOINTS = [REMOTE_API_BASE_URL];
 const FREE_MINUTES = 5;
 const DEVICE_TOKEN_KEY = "deviceToken";

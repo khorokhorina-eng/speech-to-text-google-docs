@@ -361,7 +361,7 @@ async function openCheckoutForSelectedPlan() {
 }
 
 function openExternalPage(pathname) {
-  const base = "https://your-domain.com";
+  const base = "https://voicetext.world";
   chrome.tabs.create({ url: `${base}${pathname}` });
 }
 

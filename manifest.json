@@ -24,8 +24,8 @@
   "optional_permissions": ["activeTab"],
   "host_permissions": [
     "https://docs.google.com/*",
-    "https://your-domain.com/*",
-    "https://www.your-domain.com/*"
+    "https://voicetext.world/*",
+    "https://www.voicetext.world/*"
   ],
   "content_scripts": [
     {
