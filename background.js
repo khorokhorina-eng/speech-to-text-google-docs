@@ -213,25 +213,44 @@ async function getSubscriptionStatus(forceRefresh = false) {
     };
   }
 
-  const data = await fetchJsonFromEndpoints("/me");
-  subscriptionCache = {
-    deviceToken,
-    active: !!data.paid,
-    status: data.subscriptionStatus || "none",
-    plan: data.plan ? { planId: data.plan } : null,
-    minutesLeft: Number.isFinite(Number(data.minutesLeft))
-      ? Math.max(0, Number(data.minutesLeft))
-      : FREE_MINUTES,
-    timestamp: now,
-  };
+  try {
+    const data = await fetchJsonFromEndpoints("/me");
+    subscriptionCache = {
+      deviceToken,
+      active: !!data.paid,
+      status: data.subscriptionStatus || "none",
+      plan: data.plan ? { planId: data.plan } : null,
+      minutesLeft: Number.isFinite(Number(data.minutesLeft))
+        ? Math.max(0, Number(data.minutesLeft))
+        : FREE_MINUTES,
+      timestamp: now,
+    };
 
-  return {
-    deviceToken,
-    active: subscriptionCache.active,
-    status: subscriptionCache.status,
-    plan: subscriptionCache.plan,
-    minutesLeft: subscriptionCache.minutesLeft,
-  };
+    return {
+      deviceToken,
+      active: subscriptionCache.active,
+      status: subscriptionCache.status,
+      plan: subscriptionCache.plan,
+      minutesLeft: subscriptionCache.minutesLeft,
+    };
+  } catch (_error) {
+    const localState = await getLocalTrialState();
+    subscriptionCache = {
+      deviceToken,
+      active: false,
+      status: "none",
+      plan: null,
+      minutesLeft: localState.minutesLeft,
+      timestamp: now,
+    };
+    return {
+      deviceToken,
+      active: false,
+      status: "none",
+      plan: null,
+      minutesLeft: localState.minutesLeft,
+    };
+  }
 }
 
 async function getDictationQuota() {
@@ -314,24 +333,47 @@ async function addDictationUsage(seconds) {
     };
   }
 
-  const data = await fetchJsonFromEndpoints("/usage", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ seconds: roundedSeconds }),
-  });
+  try {
+    const data = await fetchJsonFromEndpoints("/usage", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ seconds: roundedSeconds }),
+    });
 
-  subscriptionCache.timestamp = 0;
+    subscriptionCache.timestamp = 0;
 
-  return {
-    usedSeconds: roundedSeconds,
-    limitSeconds: Number(data.minutesLeft || 0) * 60,
-    remainingSeconds: Number(data.minutesLeft || 0) * 60,
-    isLimited: Number(data.minutesLeft || 0) <= 0,
-    isSubscribed: !!data.paid,
-    subscriptionStatus: data.subscriptionStatus || "none",
-    plan: data.plan ? { planId: data.plan } : null,
-    minutesLeft: Number(data.minutesLeft || 0),
-  };
+    return {
+      usedSeconds: roundedSeconds,
+      limitSeconds: Number(data.minutesLeft || 0) * 60,
+      remainingSeconds: Number(data.minutesLeft || 0) * 60,
+      isLimited: Number(data.minutesLeft || 0) <= 0,
+      isSubscribed: !!data.paid,
+      subscriptionStatus: data.subscriptionStatus || "none",
+      plan: data.plan ? { planId: data.plan } : null,
+      minutesLeft: Number(data.minutesLeft || 0),
+    };
+  } catch (_error) {
+    const localState = await consumeLocalTrialMinutes(roundedSeconds);
+    subscriptionCache = {
+      deviceToken: await getOrCreateDeviceToken(),
+      active: false,
+      status: "none",
+      plan: null,
+      minutesLeft: localState.minutesLeft,
+      timestamp: Date.now(),
+    };
+
+    return {
+      usedSeconds: roundedSeconds,
+      limitSeconds: localState.minutesLeft * 60,
+      remainingSeconds: localState.minutesLeft * 60,
+      isLimited: localState.minutesLeft <= 0,
+      isSubscribed: false,
+      subscriptionStatus: "none",
+      plan: null,
+      minutesLeft: localState.minutesLeft,
+    };
+  }
 }
 
 async function createCheckoutSession(planId, returnUrl) {

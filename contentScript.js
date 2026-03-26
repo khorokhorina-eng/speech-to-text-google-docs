@@ -50,6 +50,8 @@ let quotaTimer = null;
 let sessionSecondsTimer = null;
 let lastErrorMessage = "";
 let unloadCommitStarted = false;
+let lastFocusedTarget = null;
+let iframeListenersBound = false;
 const insertionHistory = [];
 
 function sendStateUpdate() {
@@ -80,6 +82,39 @@ function clearSessionSecondsTimer() {
     clearInterval(sessionSecondsTimer);
     sessionSecondsTimer = null;
   }
+}
+
+function rememberFocusedTarget(target) {
+  if (!target) {
+    return;
+  }
+
+  lastFocusedTarget = target;
+  state.cursorReady = true;
+  sendStateUpdate();
+}
+
+function getIframeBody() {
+  const iframe = document.querySelector(".docs-texteventtarget-iframe");
+  return iframe?.contentDocument?.body || null;
+}
+
+function bindIframeListeners() {
+  const iframe = document.querySelector(".docs-texteventtarget-iframe");
+  const iframeDocument = iframe?.contentDocument || null;
+  if (!iframeDocument || iframeListenersBound) {
+    return;
+  }
+
+  const markReady = () => {
+    const target = iframeDocument.activeElement || iframeDocument.body;
+    rememberFocusedTarget(target);
+  };
+
+  iframeDocument.addEventListener("focusin", markReady, true);
+  iframeDocument.addEventListener("mouseup", markReady, true);
+  iframeDocument.addEventListener("keyup", markReady, true);
+  iframeListenersBound = true;
 }
 
 function dispatchSyntheticInput(target, text = "") {
@@ -145,8 +180,16 @@ async function commitUsage() {
 }
 
 function focusGoogleDocsSurface() {
-  const iframe = document.querySelector(".docs-texteventtarget-iframe");
-  const iframeBody = iframe?.contentDocument?.body || null;
+  bindIframeListeners();
+
+  if (lastFocusedTarget?.isConnected) {
+    if (lastFocusedTarget instanceof HTMLElement) {
+      lastFocusedTarget.focus();
+    }
+    return lastFocusedTarget;
+  }
+
+  const iframeBody = getIframeBody();
   if (iframeBody) {
     iframeBody.focus();
     return iframeBody;
@@ -342,13 +385,13 @@ function insertTextIntoDocument(text) {
   const activeElement = document.activeElement;
 
   if (activeElement && insertTextWithSelection(activeElement, normalized)) {
-    state.cursorReady = true;
+    rememberFocusedTarget(activeElement);
     return true;
   }
 
   const docsSurface = focusGoogleDocsSurface();
   if (docsSurface && insertTextWithSelection(docsSurface, normalized)) {
-    state.cursorReady = true;
+    rememberFocusedTarget(docsSurface);
     return true;
   }
 
@@ -625,12 +668,31 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
 
 document.addEventListener(
   "focusin",
-  () => {
-    state.cursorReady = true;
-    sendStateUpdate();
+  (event) => {
+    rememberFocusedTarget(event.target);
   },
   true
 );
+
+document.addEventListener(
+  "mouseup",
+  (event) => {
+    rememberFocusedTarget(event.target);
+    bindIframeListeners();
+  },
+  true
+);
+
+setInterval(() => {
+  bindIframeListeners();
+  const iframeBody = getIframeBody();
+  if (!state.cursorReady && iframeBody) {
+    const iframeSelection = iframeBody.ownerDocument?.defaultView?.getSelection?.();
+    if (iframeSelection?.rangeCount) {
+      rememberFocusedTarget(iframeBody);
+    }
+  }
+}, 1500);
 
 window.addEventListener("pagehide", () => {
   void flushUsageOnUnload();
