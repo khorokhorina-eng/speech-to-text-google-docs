@@ -23,6 +23,7 @@ const authSignedInEl = document.getElementById("authSignedIn");
 const authGoogleBtn = document.getElementById("authGoogle");
 const authSignedInTextEl = document.getElementById("authSignedInText");
 const authSignOutBtn = document.getElementById("authSignOut");
+const DICTATION_LANGUAGE_KEY = "dictationLanguage";
 
 const state = {
   dictation: {
@@ -81,6 +82,18 @@ function sendRuntimeMessage(message) {
       }
       resolve(response);
     });
+  });
+}
+
+function readStorage(keys) {
+  return new Promise((resolve) => {
+    chrome.storage.local.get(keys, (result) => resolve(result || {}));
+  });
+}
+
+function writeStorage(payload) {
+  return new Promise((resolve) => {
+    chrome.storage.local.set(payload, () => resolve());
   });
 }
 
@@ -149,6 +162,8 @@ function updateDictationUI() {
   if (!dictation.isDocsPage) {
     startBtn.disabled = true;
     hintEl.textContent = "Open a Google Docs document first.";
+  } else if (dictation.status === "idle" && !dictation.cursorReady) {
+    hintEl.textContent = "Click inside the Google Docs editor first, then start dictation.";
   }
 
   if (dictation.language) {
@@ -215,6 +230,7 @@ async function refreshDictationState() {
 
 async function startDictation() {
   try {
+    await writeStorage({ [DICTATION_LANGUAGE_KEY]: languageSelect.value });
     await sendRuntimeMessage({
       type: "startDictation",
       language: languageSelect.value,
@@ -264,6 +280,17 @@ async function signOut() {
     setPaywallStatus("Signed out. Sign in again before checkout.");
   } catch (error) {
     setPaywallStatus(error.message || "Unable to sign out.");
+  }
+}
+
+async function loadSavedLanguage() {
+  const result = await readStorage([DICTATION_LANGUAGE_KEY]);
+  const savedLanguage =
+    typeof result?.[DICTATION_LANGUAGE_KEY] === "string" ? result[DICTATION_LANGUAGE_KEY].trim() : "";
+  if (savedLanguage) {
+    languageSelect.value = savedLanguage;
+    state.dictation.language = savedLanguage;
+    updateUI();
   }
 }
 
@@ -375,8 +402,12 @@ authSignOutBtn.addEventListener("click", () => {
   signOut();
 });
 
+languageSelect.addEventListener("change", () => {
+  void writeStorage({ [DICTATION_LANGUAGE_KEY]: languageSelect.value });
+});
+
 updateUI();
-void Promise.all([loadAuthState(), loadSubscriptionStatus(), refreshDictationState()]);
+void Promise.all([loadSavedLanguage(), loadAuthState(), loadSubscriptionStatus(), refreshDictationState()]);
 setInterval(() => {
   refreshDictationState();
 }, 1500);

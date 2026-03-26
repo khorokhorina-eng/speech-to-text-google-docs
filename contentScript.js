@@ -18,6 +18,20 @@ const state = {
   cursorReady: false,
 };
 
+const VOICE_COMMANDS = [
+  { pattern: /\bnew paragraph\b/gi, value: "\n\n" },
+  { pattern: /\b(new line|next line)\b/gi, value: "\n" },
+  { pattern: /\b(comma)\b/gi, value: "," },
+  { pattern: /\b(period|full stop)\b/gi, value: "." },
+  { pattern: /\b(question mark)\b/gi, value: "?" },
+  { pattern: /\b(exclamation mark|exclamation point)\b/gi, value: "!" },
+  { pattern: /\b(colon)\b/gi, value: ":" },
+  { pattern: /\b(semicolon)\b/gi, value: ";" },
+  { pattern: /\b(open quote)\b/gi, value: '"' },
+  { pattern: /\b(close quote)\b/gi, value: '"' },
+  { pattern: /\b(dash|hyphen)\b/gi, value: " - " },
+];
+
 let recognition = null;
 let desiredRunning = false;
 let manualStopInProgress = false;
@@ -25,6 +39,7 @@ let sessionStartedAtMs = 0;
 let quotaTimer = null;
 let sessionSecondsTimer = null;
 let lastErrorMessage = "";
+let unloadCommitStarted = false;
 
 function sendStateUpdate() {
   chrome.runtime.sendMessage({
@@ -54,6 +69,24 @@ function clearSessionSecondsTimer() {
     clearInterval(sessionSecondsTimer);
     sessionSecondsTimer = null;
   }
+}
+
+function dispatchSyntheticInput(target, text = "") {
+  const ownerWindow = target?.ownerDocument?.defaultView || window;
+  try {
+    target?.dispatchEvent(
+      new ownerWindow.InputEvent("beforeinput", {
+        bubbles: true,
+        cancelable: true,
+        data: text,
+        inputType: "insertText",
+      })
+    );
+  } catch (_error) {
+    // Older editors may not support InputEvent construction.
+  }
+
+  target?.dispatchEvent(new Event("input", { bubbles: true }));
 }
 
 function markSessionStart() {
@@ -122,6 +155,58 @@ function focusGoogleDocsSurface() {
   return active instanceof HTMLElement ? active : null;
 }
 
+function ensureCollapsedSelection(target) {
+  const ownerDocument = target.ownerDocument || document;
+  const ownerWindow = ownerDocument.defaultView || window;
+  const selection = ownerWindow.getSelection ? ownerWindow.getSelection() : null;
+  if (!selection) {
+    return null;
+  }
+
+  if (selection.rangeCount > 0) {
+    return selection;
+  }
+
+  const range = ownerDocument.createRange();
+  if (target.nodeType === Node.TEXT_NODE) {
+    range.setStart(target, target.textContent?.length || 0);
+  } else {
+    range.selectNodeContents(target);
+    range.collapse(false);
+  }
+  selection.removeAllRanges();
+  selection.addRange(range);
+  return selection;
+}
+
+function normalizeTranscriptChunk(text) {
+  if (!text) {
+    return "";
+  }
+
+  let normalized = text.replace(/\s+/g, " ").trim();
+  VOICE_COMMANDS.forEach(({ pattern, value }) => {
+    normalized = normalized.replace(pattern, value);
+  });
+
+  normalized = normalized
+    .replace(/\s+([,.;:!?])/g, "$1")
+    .replace(/([(\[{])\s+/g, "$1")
+    .replace(/\s+([)\]}])/g, "$1")
+    .replace(/"\s+/g, '" ')
+    .replace(/\s*\n\s*/g, "\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .replace(/[ \t]{2,}/g, " ");
+
+  const previous = state.transcript.trim();
+  const shouldCapitalize = !previous || /[.!?\n]\s*$/.test(previous);
+  if (shouldCapitalize && /^[a-z]/.test(normalized)) {
+    normalized = normalized[0].toUpperCase() + normalized.slice(1);
+  }
+
+  return normalized;
+}
+
 function insertTextWithSelection(target, text) {
   if (!target || !text) {
     return false;
@@ -138,7 +223,7 @@ function insertTextWithSelection(target, text) {
     const end = target.selectionEnd ?? target.value.length;
     target.focus();
     target.setRangeText(text, start, end, "end");
-    target.dispatchEvent(new Event("input", { bubbles: true }));
+    dispatchSyntheticInput(target, text);
     return true;
   }
 
@@ -147,6 +232,7 @@ function insertTextWithSelection(target, text) {
   if (typeof ownerDocument.execCommand === "function") {
     try {
       if (ownerDocument.execCommand("insertText", false, text)) {
+        dispatchSyntheticInput(target, text);
         return true;
       }
     } catch (_error) {
@@ -154,7 +240,7 @@ function insertTextWithSelection(target, text) {
     }
   }
 
-  const selection = ownerWindow.getSelection ? ownerWindow.getSelection() : null;
+  const selection = ensureCollapsedSelection(target) || (ownerWindow.getSelection ? ownerWindow.getSelection() : null);
   if (!selection || !selection.rangeCount) {
     return false;
   }
@@ -167,7 +253,7 @@ function insertTextWithSelection(target, text) {
   range.collapse(true);
   selection.removeAllRanges();
   selection.addRange(range);
-  target.dispatchEvent(new Event("input", { bubbles: true }));
+  dispatchSyntheticInput(target, text);
   return true;
 }
 
@@ -176,7 +262,13 @@ function insertTextIntoDocument(text) {
     return false;
   }
 
-  const normalized = /\s$/.test(text) ? text : `${text} `;
+  const normalizedTranscript = normalizeTranscriptChunk(text);
+  if (!normalizedTranscript) {
+    return false;
+  }
+
+  const appendTrailingSpace = !/[\n,.;:!?"]$/.test(normalizedTranscript);
+  const normalized = appendTrailingSpace ? `${normalizedTranscript} ` : normalizedTranscript;
   const activeElement = document.activeElement;
 
   if (activeElement && insertTextWithSelection(activeElement, normalized)) {
@@ -230,10 +322,11 @@ function createRecognition() {
           );
           return;
         }
-        state.transcript = `${state.transcript}${transcript} `.trim();
-        state.insertedChars += transcript.length;
+        const normalizedTranscript = normalizeTranscriptChunk(transcript);
+        state.transcript = `${state.transcript}${normalizedTranscript}`.trim();
+        state.insertedChars += normalizedTranscript.length;
       } else {
-        interimTranscript += transcript;
+        interimTranscript += ` ${normalizeTranscriptChunk(transcript)}`;
       }
     }
 
@@ -398,6 +491,31 @@ async function stopDictation() {
   setStatus("idle", "Dictation stopped.");
 }
 
+async function flushUsageOnUnload() {
+  if (unloadCommitStarted || !sessionStartedAtMs) {
+    return;
+  }
+
+  unloadCommitStarted = true;
+  desiredRunning = false;
+  clearQuotaTimer();
+  clearSessionSecondsTimer();
+
+  if (recognition) {
+    try {
+      recognition.stop();
+    } catch (_error) {
+      // No-op.
+    }
+  }
+
+  try {
+    await commitUsage();
+  } catch (_error) {
+    // Ignore unload-time failures.
+  }
+}
+
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   if (!message?.type) {
     return false;
@@ -433,5 +551,13 @@ document.addEventListener(
   },
   true
 );
+
+window.addEventListener("pagehide", () => {
+  void flushUsageOnUnload();
+});
+
+window.addEventListener("beforeunload", () => {
+  void flushUsageOnUnload();
+});
 
 sendStateUpdate();

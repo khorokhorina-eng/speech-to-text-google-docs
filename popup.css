@@ -111,6 +111,7 @@ body {
 .doc-title,
 .quota,
 .transcript,
+.panel-note,
 .account-state,
 .auth-message,
 .auth-signed-in-text,
@@ -231,6 +232,11 @@ button:disabled {
 
 .transcript {
   min-height: 36px;
+}
+
+.panel-note {
+  margin-top: 8px;
+  color: var(--muted);
 }
 
 .footer-links {

@@ -276,6 +276,7 @@ function getDefaultTabState() {
     language: "en-US",
     insertedChars: 0,
     sessionSeconds: 0,
+    cursorReady: false,
   };
 }
 
