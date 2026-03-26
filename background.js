@@ -390,6 +390,11 @@ async function stopDictation() {
   };
 }
 
+async function openGoogleDocs() {
+  await chrome.tabs.create({ url: "https://docs.google.com/document/u/0/" });
+  return { opened: true };
+}
+
 chrome.tabs.onRemoved.addListener((tabId) => {
   tabStateCache.delete(tabId);
 });
@@ -478,6 +483,13 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     stopDictation()
       .then((result) => sendResponse({ ok: true, ...result }))
       .catch((error) => sendResponse({ ok: false, error: error.message || "Failed to stop dictation." }));
+    return true;
+  }
+
+  if (message.type === "openGoogleDocs") {
+    openGoogleDocs()
+      .then((result) => sendResponse({ ok: true, ...result }))
+      .catch((error) => sendResponse({ ok: false, error: error.message || "Failed to open Google Docs." }));
     return true;
   }
 

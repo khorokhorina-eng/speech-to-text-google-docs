@@ -3,8 +3,11 @@ const hintEl = document.getElementById("hint");
 const docTitleEl = document.getElementById("docTitle");
 const quotaEl = document.getElementById("quota");
 const transcriptEl = document.getElementById("transcript");
+const sessionTimeEl = document.getElementById("sessionTime");
+const insertedCharsEl = document.getElementById("insertedChars");
 const startBtn = document.getElementById("start");
 const stopBtn = document.getElementById("stop");
+const openDocsBtn = document.getElementById("openDocs");
 const languageSelect = document.getElementById("language");
 const upgradeBtn = document.getElementById("upgrade");
 const pricingLinkBtn = document.getElementById("pricingLink");
@@ -153,11 +156,14 @@ function updateDictationUI() {
 
   const transcript = [dictation.transcript, dictation.interimTranscript].filter(Boolean).join(" ");
   transcriptEl.textContent = transcript || "Dictated text will appear here while you speak.";
+  sessionTimeEl.textContent = `${Math.max(0, Number(dictation.sessionSeconds) || 0)}s`;
+  insertedCharsEl.textContent = `${Math.max(0, Number(dictation.insertedChars) || 0)} characters inserted`;
 
   const isRunning = dictation.status === "listening" || dictation.status === "starting";
   startBtn.disabled = !dictation.isDocsPage || !dictation.supported || isRunning;
   stopBtn.disabled = !isRunning;
   languageSelect.disabled = isRunning;
+  openDocsBtn.hidden = dictation.isDocsPage;
 
   if (!dictation.isDocsPage) {
     startBtn.disabled = true;
@@ -254,6 +260,14 @@ async function stopDictation() {
     // The content script may have already stopped the session.
   }
   await Promise.all([refreshDictationState(), loadSubscriptionStatus()]);
+}
+
+async function openGoogleDocs() {
+  try {
+    await sendRuntimeMessage({ type: "openGoogleDocs" });
+  } catch (_error) {
+    chrome.tabs.create({ url: "https://docs.google.com/document/u/0/" });
+  }
 }
 
 async function signInWithGoogle() {
@@ -357,6 +371,10 @@ startBtn.addEventListener("click", () => {
 
 stopBtn.addEventListener("click", () => {
   stopDictation();
+});
+
+openDocsBtn.addEventListener("click", () => {
+  openGoogleDocs();
 });
 
 upgradeBtn.addEventListener("click", () => {
