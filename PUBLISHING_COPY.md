@@ -1,36 +1,45 @@
 # Chrome Web Store Copy
 
-## Status
-
-This file is still a placeholder for the new product.
-
-Before launch, replace:
-
-- product description
-- privacy policy text
-- final domain
-- final support email
-- final disclosure wording
-
-## Working Product Name
+## Product Name
 
 Speech to Text for Google Docs
 
-## Temporary Short Description
+## Short Description
 
-Voice dictation scaffold for Google Docs with sign-in, trial limits, and Stripe billing.
+Dictate into Google Docs with voice typing, trial minutes, Google sign-in, and paid plans.
 
-## Temporary Detailed Description
+## Detailed Description
 
-Speech to Text for Google Docs is being prepared as a new Chrome extension product based on the same account, paywall, and billing structure used in the template project.
+Speech to Text for Google Docs helps you turn spoken words into text while working directly inside Google Docs.
 
-Before launch, this listing must be rewritten to match:
+Use it to:
 
-- the final speech-to-text feature set
-- the final domain
-- the final privacy policy
-- the final pricing and limits
+- dictate notes, drafts, and outlines without typing
+- keep your cursor inside Google Docs and insert text where you are already working
+- switch languages for dictation sessions
+- use voice-friendly punctuation commands such as `comma`, `period`, `new line`, and `new paragraph`
 
-## Temporary Privacy Disclosure
+How it works:
 
-This new product still requires a product-specific backend, domain, privacy policy, and support email before publication.
+- open a Google Docs document
+- place the cursor where text should appear
+- start dictation from the extension popup
+- speak and review the live transcript while text is inserted into the document
+
+Account and billing:
+
+- includes 5 free minutes of dictation
+- continued use requires a paid plan
+- Google sign-in is required before checkout
+- billing is handled through Stripe
+
+Plans:
+
+- Monthly: 300 minutes per month
+- Annual: 60 hours per year
+
+This extension is designed for Google Docs workflows and is intended for writing, note-taking, drafting, and general speech-to-text input in the browser.
+
+## Privacy Disclosure
+
+This extension processes account, billing, and usage-limit data through `voicetext.world` to support free trial limits, Google sign-in, subscription status, and Stripe checkout. Support contact: `hello@voicetext.world`.
