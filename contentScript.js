@@ -29,8 +29,18 @@ const VOICE_COMMANDS = [
   { pattern: /\b(semicolon)\b/gi, value: ";" },
   { pattern: /\b(open quote)\b/gi, value: '"' },
   { pattern: /\b(close quote)\b/gi, value: '"' },
+  { pattern: /\b(apostrophe)\b/gi, value: "'" },
+  { pattern: /\b(open parenthesis)\b/gi, value: "(" },
+  { pattern: /\b(close parenthesis)\b/gi, value: ")" },
+  { pattern: /\b(open bracket)\b/gi, value: "[" },
+  { pattern: /\b(close bracket)\b/gi, value: "]" },
   { pattern: /\b(dash|hyphen)\b/gi, value: " - " },
 ];
+
+const COMMAND_PATTERNS = {
+  undo: /^(undo|go back)$/i,
+  deleteLastSentence: /^(delete last sentence|remove last sentence)$/i,
+};
 
 let recognition = null;
 let desiredRunning = false;
@@ -40,6 +50,7 @@ let quotaTimer = null;
 let sessionSecondsTimer = null;
 let lastErrorMessage = "";
 let unloadCommitStarted = false;
+const insertionHistory = [];
 
 function sendStateUpdate() {
   chrome.runtime.sendMessage({
@@ -207,6 +218,65 @@ function normalizeTranscriptChunk(text) {
   return normalized;
 }
 
+function isVoiceCommand(text, pattern) {
+  return Boolean(text && pattern.test(text.trim()));
+}
+
+function dispatchUndoShortcut(target) {
+  const eventTarget = target instanceof HTMLElement ? target : document.activeElement || document.body;
+  const isMac = /Mac/i.test(navigator.platform);
+  const shortcut = new KeyboardEvent("keydown", {
+    bubbles: true,
+    cancelable: true,
+    key: "z",
+    code: "KeyZ",
+    ctrlKey: !isMac,
+    metaKey: isMac,
+  });
+  eventTarget.dispatchEvent(shortcut);
+}
+
+function trimTranscriptByChunk(chunk) {
+  if (!chunk) {
+    return;
+  }
+  if (state.transcript.endsWith(chunk)) {
+    state.transcript = state.transcript.slice(0, -chunk.length).trimEnd();
+    return;
+  }
+  state.transcript = state.transcript.replace(new RegExp(`${chunk.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}$`), "").trimEnd();
+}
+
+function undoLastInsertion() {
+  const lastInserted = insertionHistory.pop();
+  if (!lastInserted) {
+    setStatus("error", "Nothing to undo yet.");
+    return false;
+  }
+
+  const target = focusGoogleDocsSurface();
+  if (target && typeof document.execCommand === "function") {
+    try {
+      if (document.execCommand("undo")) {
+        trimTranscriptByChunk(lastInserted);
+        state.insertedChars = Math.max(0, state.insertedChars - lastInserted.length);
+        state.interimTranscript = "";
+        setStatus("idle", "Undid the last dictated text.");
+        return true;
+      }
+    } catch (_error) {
+      // Fall through to shortcut dispatch.
+    }
+  }
+
+  dispatchUndoShortcut(target);
+  trimTranscriptByChunk(lastInserted);
+  state.insertedChars = Math.max(0, state.insertedChars - lastInserted.length);
+  state.interimTranscript = "";
+  setStatus("idle", "Requested undo for the last dictated text.");
+  return true;
+}
+
 function insertTextWithSelection(target, text) {
   if (!target || !text) {
     return false;
@@ -311,6 +381,16 @@ function createRecognition() {
       }
 
       if (result.isFinal) {
+        const normalizedTranscript = normalizeTranscriptChunk(transcript);
+        if (isVoiceCommand(normalizedTranscript, COMMAND_PATTERNS.undo)) {
+          undoLastInsertion();
+          return;
+        }
+        if (isVoiceCommand(normalizedTranscript, COMMAND_PATTERNS.deleteLastSentence)) {
+          undoLastInsertion();
+          return;
+        }
+
         const inserted = insertTextIntoDocument(transcript);
         if (!inserted) {
           desiredRunning = false;
@@ -322,9 +402,9 @@ function createRecognition() {
           );
           return;
         }
-        const normalizedTranscript = normalizeTranscriptChunk(transcript);
         state.transcript = `${state.transcript}${normalizedTranscript}`.trim();
         state.insertedChars += normalizedTranscript.length;
+        insertionHistory.push(normalizedTranscript);
       } else {
         interimTranscript += ` ${normalizeTranscriptChunk(transcript)}`;
       }

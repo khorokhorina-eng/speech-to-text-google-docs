@@ -3,6 +3,7 @@ const BILLING_ENDPOINTS = [REMOTE_API_BASE_URL];
 const FREE_MINUTES = 5;
 const DEVICE_TOKEN_KEY = "deviceToken";
 const AUTH_SESSION_KEY = "authSession";
+const LOCAL_TRIAL_STATE_KEY = "localTrialState";
 const SUBSCRIPTION_CACHE_MS = 30 * 1000;
 
 let subscriptionCache = {
@@ -15,6 +16,10 @@ let subscriptionCache = {
 };
 
 const tabStateCache = new Map();
+
+function isRemoteConfigured() {
+  return Boolean(REMOTE_API_BASE_URL) && !/your-domain\.com/i.test(REMOTE_API_BASE_URL);
+}
 
 chrome.runtime.onInstalled.addListener((details) => {
   if (details.reason !== "install") {
@@ -94,6 +99,17 @@ async function getAuthState() {
   const cached = await readStorage([AUTH_SESSION_KEY]);
   const cachedSession = cached?.[AUTH_SESSION_KEY];
 
+  if (!isRemoteConfigured()) {
+    const email = typeof cachedSession?.email === "string" ? cachedSession.email.trim() : "";
+    return {
+      signedIn: false,
+      email,
+      method: null,
+      signedInAt: null,
+      deviceToken,
+    };
+  }
+
   try {
     const data = await fetchJsonFromEndpoints(`/auth/me?device_token=${encodeURIComponent(deviceToken)}`);
     const session = {
@@ -123,6 +139,17 @@ async function getAuthState() {
 
 async function signOut() {
   const deviceToken = await getOrCreateDeviceToken();
+  if (!isRemoteConfigured()) {
+    await writeStorage({ [AUTH_SESSION_KEY]: null });
+    return {
+      signedIn: false,
+      email: "",
+      method: null,
+      signedInAt: null,
+      deviceToken,
+    };
+  }
+
   try {
     await fetchJsonFromEndpoints("/auth/logout", {
       method: "POST",
@@ -145,6 +172,9 @@ async function signOut() {
 
 async function startGoogleSignIn(returnUrl) {
   const deviceToken = await getOrCreateDeviceToken();
+  if (!isRemoteConfigured()) {
+    throw new Error("Configure the product domain and backend before Google sign-in.");
+  }
   const target = new URL(`${REMOTE_API_BASE_URL}/auth/google/start`);
   target.searchParams.set("device_token", deviceToken);
   if (typeof returnUrl === "string" && returnUrl.trim()) {
@@ -157,6 +187,17 @@ async function startGoogleSignIn(returnUrl) {
 async function getSubscriptionStatus(forceRefresh = false) {
   const deviceToken = await getOrCreateDeviceToken();
   const now = Date.now();
+
+  if (!isRemoteConfigured()) {
+    const localState = await getLocalTrialState();
+    return {
+      deviceToken,
+      active: false,
+      status: "none",
+      plan: null,
+      minutesLeft: localState.minutesLeft,
+    };
+  }
 
   if (
     !forceRefresh &&
@@ -211,10 +252,66 @@ async function getDictationQuota() {
   };
 }
 
+function getDefaultLocalTrialState() {
+  return {
+    minutesLeft: FREE_MINUTES,
+    updatedAt: Date.now(),
+  };
+}
+
+async function getLocalTrialState() {
+  const result = await readStorage([LOCAL_TRIAL_STATE_KEY]);
+  const raw = result?.[LOCAL_TRIAL_STATE_KEY];
+  if (!raw || !Number.isFinite(Number(raw.minutesLeft))) {
+    const initial = getDefaultLocalTrialState();
+    await writeStorage({ [LOCAL_TRIAL_STATE_KEY]: initial });
+    return initial;
+  }
+
+  return {
+    minutesLeft: Math.max(0, Math.floor(Number(raw.minutesLeft))),
+    updatedAt: Number(raw.updatedAt) || Date.now(),
+  };
+}
+
+async function consumeLocalTrialMinutes(seconds) {
+  const current = await getLocalTrialState();
+  const usageMinutes = Math.max(1, Math.ceil(Math.max(0, Number(seconds) || 0) / 60));
+  const next = {
+    minutesLeft: Math.max(0, current.minutesLeft - usageMinutes),
+    updatedAt: Date.now(),
+  };
+  await writeStorage({ [LOCAL_TRIAL_STATE_KEY]: next });
+  return next;
+}
+
 async function addDictationUsage(seconds) {
   const roundedSeconds = Math.max(0, Number(seconds) || 0);
   if (!roundedSeconds) {
     return getDictationQuota();
+  }
+
+  if (!isRemoteConfigured()) {
+    const localState = await consumeLocalTrialMinutes(roundedSeconds);
+    subscriptionCache = {
+      deviceToken: await getOrCreateDeviceToken(),
+      active: false,
+      status: "none",
+      plan: null,
+      minutesLeft: localState.minutesLeft,
+      timestamp: Date.now(),
+    };
+
+    return {
+      usedSeconds: roundedSeconds,
+      limitSeconds: localState.minutesLeft * 60,
+      remainingSeconds: localState.minutesLeft * 60,
+      isLimited: localState.minutesLeft <= 0,
+      isSubscribed: false,
+      subscriptionStatus: "none",
+      plan: null,
+      minutesLeft: localState.minutesLeft,
+    };
   }
 
   const data = await fetchJsonFromEndpoints("/usage", {
@@ -239,6 +336,9 @@ async function addDictationUsage(seconds) {
 
 async function createCheckoutSession(planId, returnUrl) {
   const deviceToken = await getOrCreateDeviceToken();
+  if (!isRemoteConfigured()) {
+    throw new Error("Configure the product backend before opening checkout.");
+  }
   const authState = await getAuthState();
 
   if (!authState.signedIn || !authState.email) {
