@@ -7,6 +7,7 @@ This file is the working reference for the live product codebase.
 - Product name: `Speech to Text for Google Docs`
 - Project folder: [speech-to-text-google-docs](/Users/n.khorokhorina/speech-to-text-google-docs)
 - The extension runtime is Google Docs-specific.
+- Dictation uses microphone capture in the content script and OpenAI transcription through the backend.
 
 ## What Is Already Reused
 
@@ -17,6 +18,7 @@ This file is the working reference for the live product codebase.
 - welcome page structure
 - popup and paywall structure
 - static marketing site structure
+- OpenAI transcription backend route
 
 ## What Still Must Be Replaced
 
@@ -44,8 +46,9 @@ Before shipping, replace:
 3. Replace product copy across popup, welcome page, paywall, and `site/`.
 4. Create product-specific Stripe prices.
 5. Create product-specific Google OAuth credentials.
-6. Deploy product-specific backend and site.
-7. Rebuild the Chrome Web Store zip.
+6. Set `OPENAI_API_KEY` and optional `OPENAI_TRANSCRIBE_MODEL` on the backend.
+7. Deploy product-specific backend and site.
+8. Rebuild the Chrome Web Store zip.
 
 ## Local Repo Workflow
 

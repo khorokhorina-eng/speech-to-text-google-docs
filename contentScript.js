@@ -1,18 +1,25 @@
-const SpeechRecognitionCtor =
-  window.SpeechRecognition || window.webkitSpeechRecognition || null;
+const HAS_RECORDING_SUPPORT = Boolean(
+  navigator.mediaDevices?.getUserMedia && window.MediaRecorder
+);
+const RECORDER_TIMESLICE_MS = 4000;
+const RECORDER_MIME_CANDIDATES = [
+  "audio/webm;codecs=opus",
+  "audio/webm",
+  "audio/mp4",
+];
 
 const state = {
   connected: true,
-  supported: Boolean(SpeechRecognitionCtor),
+  supported: HAS_RECORDING_SUPPORT,
   isDocsPage: location.href.startsWith("https://docs.google.com/document/"),
-  status: SpeechRecognitionCtor ? "idle" : "unsupported",
-  message: SpeechRecognitionCtor
-    ? "Place the cursor in Google Docs, then start dictation."
-    : "This browser does not support speech recognition for this extension.",
+  status: HAS_RECORDING_SUPPORT ? "idle" : "unsupported",
+  message: HAS_RECORDING_SUPPORT
+    ? "Place the cursor in Google Docs, then start AI dictation."
+    : "This browser does not support microphone recording for this extension.",
   transcript: "",
   interimTranscript: "",
   docTitle: document.title.replace(/\s*-\s*Google Docs\s*$/, ""),
-  language: "en-US",
+  language: "Auto",
   insertedChars: 0,
   sessionSeconds: 0,
   cursorReady: false,
@@ -42,9 +49,9 @@ const COMMAND_PATTERNS = {
   deleteLastSentence: /^(delete last sentence|remove last sentence)$/i,
 };
 
-let recognition = null;
+let mediaStream = null;
+let mediaRecorder = null;
 let desiredRunning = false;
-let manualStopInProgress = false;
 let sessionStartedAtMs = 0;
 let quotaTimer = null;
 let sessionSecondsTimer = null;
@@ -52,6 +59,7 @@ let lastErrorMessage = "";
 let unloadCommitStarted = false;
 let lastFocusedTarget = null;
 let iframeListenersBound = false;
+let transcriptionQueue = Promise.resolve();
 const insertionHistory = [];
 
 function sendStateUpdate() {
@@ -82,6 +90,50 @@ function clearSessionSecondsTimer() {
     clearInterval(sessionSecondsTimer);
     sessionSecondsTimer = null;
   }
+}
+
+function sendRuntimeMessage(message) {
+  return new Promise((resolve, reject) => {
+    chrome.runtime.sendMessage(message, (response) => {
+      if (chrome.runtime.lastError) {
+        reject(new Error(chrome.runtime.lastError.message));
+        return;
+      }
+      if (!response?.ok) {
+        reject(new Error(response?.error || "Request failed."));
+        return;
+      }
+      resolve(response);
+    });
+  });
+}
+
+function getPreferredRecorderMimeType() {
+  for (const candidate of RECORDER_MIME_CANDIDATES) {
+    if (window.MediaRecorder?.isTypeSupported?.(candidate)) {
+      return candidate;
+    }
+  }
+  return "";
+}
+
+async function blobToBase64(blob) {
+  const buffer = await blob.arrayBuffer();
+  let binary = "";
+  const bytes = new Uint8Array(buffer);
+  const chunkSize = 0x8000;
+  for (let index = 0; index < bytes.length; index += chunkSize) {
+    binary += String.fromCharCode(...bytes.subarray(index, index + chunkSize));
+  }
+  return btoa(binary);
+}
+
+function releaseMicrophone() {
+  if (!mediaStream) {
+    return;
+  }
+  mediaStream.getTracks().forEach((track) => track.stop());
+  mediaStream = null;
 }
 
 function rememberFocusedTarget(target) {
@@ -161,22 +213,7 @@ async function commitUsage() {
     return null;
   }
 
-  return new Promise((resolve, reject) => {
-    chrome.runtime.sendMessage(
-      { type: "addDictationUsage", seconds: elapsedSeconds },
-      (response) => {
-        if (chrome.runtime.lastError) {
-          reject(new Error(chrome.runtime.lastError.message));
-          return;
-        }
-        if (!response?.ok) {
-          reject(new Error(response?.error || "Unable to save usage."));
-          return;
-        }
-        resolve(response);
-      }
-    );
-  });
+  return sendRuntimeMessage({ type: "addDictationUsage", seconds: elapsedSeconds });
 }
 
 function focusGoogleDocsSurface() {
@@ -259,6 +296,21 @@ function normalizeTranscriptChunk(text) {
   }
 
   return normalized;
+}
+
+async function transcribeAudioChunk(blob) {
+  if (!blob?.size) {
+    return "";
+  }
+
+  const audioBase64 = await blobToBase64(blob);
+  const response = await sendRuntimeMessage({
+    type: "transcribeAudio",
+    audioBase64,
+    mimeType: blob.type || "audio/webm",
+  });
+
+  return typeof response.text === "string" ? response.text.trim() : "";
 }
 
 function isVoiceCommand(text, pattern) {
@@ -399,112 +451,75 @@ function insertTextIntoDocument(text) {
   return false;
 }
 
-function createRecognition() {
-  if (!SpeechRecognitionCtor) {
-    return null;
+async function handleTranscriptionText(text) {
+  const normalizedTranscript = normalizeTranscriptChunk(text);
+  if (!normalizedTranscript) {
+    return;
   }
 
-  const instance = new SpeechRecognitionCtor();
-  instance.continuous = true;
-  instance.interimResults = true;
-  instance.maxAlternatives = 1;
+  if (isVoiceCommand(normalizedTranscript, COMMAND_PATTERNS.undo)) {
+    undoLastInsertion();
+    return;
+  }
+  if (isVoiceCommand(normalizedTranscript, COMMAND_PATTERNS.deleteLastSentence)) {
+    undoLastInsertion();
+    return;
+  }
 
-  instance.onstart = () => {
-    lastErrorMessage = "";
-    setStatus("listening", "Listening for your voice...");
-  };
-
-  instance.onresult = (event) => {
-    let interimTranscript = "";
-    for (let index = event.resultIndex; index < event.results.length; index += 1) {
-      const result = event.results[index];
-      const transcript = result?.[0]?.transcript || "";
-      if (!transcript) {
-        continue;
-      }
-
-      if (result.isFinal) {
-        const normalizedTranscript = normalizeTranscriptChunk(transcript);
-        if (isVoiceCommand(normalizedTranscript, COMMAND_PATTERNS.undo)) {
-          undoLastInsertion();
-          return;
-        }
-        if (isVoiceCommand(normalizedTranscript, COMMAND_PATTERNS.deleteLastSentence)) {
-          undoLastInsertion();
-          return;
-        }
-
-        const inserted = insertTextIntoDocument(transcript);
-        if (!inserted) {
-          desiredRunning = false;
-          manualStopInProgress = true;
-          instance.stop();
-          setStatus(
-            "error",
-            "Click inside the Google Docs editor first, then start dictation again."
-          );
-          return;
-        }
-        state.transcript = `${state.transcript}${normalizedTranscript}`.trim();
-        state.insertedChars += normalizedTranscript.length;
-        insertionHistory.push(normalizedTranscript);
-      } else {
-        interimTranscript += ` ${normalizeTranscriptChunk(transcript)}`;
-      }
+  const inserted = insertTextIntoDocument(normalizedTranscript);
+  if (!inserted) {
+    desiredRunning = false;
+    if (mediaRecorder && mediaRecorder.state !== "inactive") {
+      mediaRecorder.stop();
     }
+    setStatus(
+      "error",
+      "Click inside the Google Docs editor first, then start dictation again."
+    );
+    return;
+  }
 
-    state.interimTranscript = interimTranscript.trim();
-    sendStateUpdate();
-  };
-
-  instance.onerror = (event) => {
-    const code = event?.error || "unknown";
-    if (code === "no-speech") {
-      lastErrorMessage = "No speech detected. Keep talking or start again.";
-      return;
-    }
-    if (code === "aborted") {
-      return;
-    }
-    if (code === "not-allowed" || code === "service-not-allowed") {
-      desiredRunning = false;
-      lastErrorMessage = "Allow microphone access in Chrome to use dictation.";
-      setStatus("error", lastErrorMessage);
-      return;
-    }
-    lastErrorMessage = `Speech recognition error: ${code}.`;
-  };
-
-  instance.onend = () => {
-    if (manualStopInProgress) {
-      manualStopInProgress = false;
-      return;
-    }
-
-    if (desiredRunning) {
-      setStatus("starting", lastErrorMessage || "Restarting speech recognition...");
-      setTimeout(() => {
-        try {
-          instance.start();
-        } catch (_error) {
-          setStatus("error", "Unable to restart dictation. Try again.");
-          desiredRunning = false;
-        }
-      }, 200);
-      return;
-    }
-
-    if (state.status !== "error") {
-      setStatus("idle", "Dictation stopped.");
-    }
-  };
-
-  return instance;
+  state.transcript = `${state.transcript} ${normalizedTranscript}`.trim();
+  state.insertedChars += normalizedTranscript.length;
+  state.interimTranscript = "";
+  insertionHistory.push(normalizedTranscript);
+  sendStateUpdate();
 }
 
-async function startDictation(language) {
-  if (!SpeechRecognitionCtor) {
-    setStatus("unsupported", "Speech recognition is not available in this browser.");
+function queueTranscription(blob) {
+  if (!blob?.size) {
+    return transcriptionQueue;
+  }
+
+  state.interimTranscript = "Transcribing...";
+  sendStateUpdate();
+
+  transcriptionQueue = transcriptionQueue
+    .then(async () => {
+      const text = await transcribeAudioChunk(blob);
+      if (text) {
+        await handleTranscriptionText(text);
+      } else {
+        state.interimTranscript = "";
+        sendStateUpdate();
+      }
+    })
+    .catch((error) => {
+      desiredRunning = false;
+      lastErrorMessage = error.message || "OpenAI transcription failed.";
+      state.interimTranscript = "";
+      setStatus("error", lastErrorMessage);
+      if (mediaRecorder && mediaRecorder.state !== "inactive") {
+        mediaRecorder.stop();
+      }
+    });
+
+  return transcriptionQueue;
+}
+
+async function startDictation() {
+  if (!HAS_RECORDING_SUPPORT) {
+    setStatus("unsupported", "Microphone recording is not available in this browser.");
     return;
   }
 
@@ -514,39 +529,15 @@ async function startDictation(language) {
     return;
   }
 
-  if (!recognition) {
-    recognition = createRecognition();
-  }
-
-  if (!recognition) {
-    setStatus("error", "Unable to initialize speech recognition.");
+  if (state.status === "listening" || state.status === "starting" || mediaRecorder) {
     return;
   }
-
-  if (state.status === "listening" || state.status === "starting") {
-    return;
-  }
-
-  state.language = typeof language === "string" && language.trim() ? language.trim() : "en-US";
-  recognition.lang = state.language;
+  state.language = "Auto";
   desiredRunning = true;
   state.interimTranscript = "";
-  markSessionStart();
   clearQuotaTimer();
 
-  const quota = await new Promise((resolve, reject) => {
-    chrome.runtime.sendMessage({ type: "getDictationQuota" }, (response) => {
-      if (chrome.runtime.lastError) {
-        reject(new Error(chrome.runtime.lastError.message));
-        return;
-      }
-      if (!response?.ok) {
-        reject(new Error(response?.error || "Unable to read quota."));
-        return;
-      }
-      resolve(response);
-    });
-  }).catch((error) => {
+  const quota = await sendRuntimeMessage({ type: "getDictationQuota" }).catch((error) => {
     desiredRunning = false;
     clearSessionSecondsTimer();
     sessionStartedAtMs = 0;
@@ -566,44 +557,95 @@ async function startDictation(language) {
     return;
   }
 
+  try {
+    mediaStream = await navigator.mediaDevices.getUserMedia({
+      audio: {
+        channelCount: 1,
+        echoCancellation: true,
+        noiseSuppression: true,
+        autoGainControl: true,
+      },
+    });
+  } catch (error) {
+    desiredRunning = false;
+    setStatus("error", "Allow microphone access in Chrome to use AI dictation.");
+    return;
+  }
+
+  const mimeType = getPreferredRecorderMimeType();
+  try {
+    mediaRecorder = mimeType
+      ? new MediaRecorder(mediaStream, { mimeType })
+      : new MediaRecorder(mediaStream);
+  } catch (error) {
+    desiredRunning = false;
+    releaseMicrophone();
+    setStatus("error", error.message || "Unable to start microphone recording.");
+    return;
+  }
+
+  mediaRecorder.ondataavailable = (event) => {
+    if (!event.data?.size) {
+      return;
+    }
+    void queueTranscription(event.data);
+  };
+
+  mediaRecorder.onerror = (event) => {
+    desiredRunning = false;
+    lastErrorMessage = event?.error?.message || "Microphone recording failed.";
+    setStatus("error", lastErrorMessage);
+  };
+
+  mediaRecorder.onstop = () => {
+    releaseMicrophone();
+    mediaRecorder = null;
+  };
+
+  markSessionStart();
   quotaTimer = setTimeout(async () => {
     desiredRunning = false;
-    manualStopInProgress = true;
     try {
-      recognition.stop();
+      if (mediaRecorder && mediaRecorder.state !== "inactive") {
+        mediaRecorder.requestData();
+        mediaRecorder.stop();
+      }
     } catch (_error) {
       // No-op.
     }
+    await transcriptionQueue.catch(() => null);
     await commitUsage().catch(() => null);
     setStatus("error", "Dictation limit reached. Upgrade to continue.");
   }, Number(quota.remainingSeconds) * 1000);
 
-  setStatus("starting", "Starting speech recognition...");
+  setStatus("starting", "Starting AI dictation...");
   try {
-    recognition.start();
+    mediaRecorder.start(RECORDER_TIMESLICE_MS);
+    setStatus("listening", "Listening and transcribing with OpenAI...");
   } catch (error) {
     desiredRunning = false;
     clearQuotaTimer();
     clearSessionSecondsTimer();
     sessionStartedAtMs = 0;
-    setStatus("error", error.message || "Unable to start dictation.");
+    releaseMicrophone();
+    mediaRecorder = null;
+    setStatus("error", error.message || "Unable to start AI dictation.");
   }
 }
 
 async function stopDictation() {
   desiredRunning = false;
   clearQuotaTimer();
-  clearSessionSecondsTimer();
-
-  if (recognition) {
-    manualStopInProgress = true;
+  if (mediaRecorder && mediaRecorder.state !== "inactive") {
     try {
-      recognition.stop();
+      mediaRecorder.requestData();
+      mediaRecorder.stop();
     } catch (_error) {
       // No-op.
     }
   }
 
+  await transcriptionQueue.catch(() => null);
   try {
     await commitUsage();
   } catch (_error) {
@@ -622,16 +664,16 @@ async function flushUsageOnUnload() {
   unloadCommitStarted = true;
   desiredRunning = false;
   clearQuotaTimer();
-  clearSessionSecondsTimer();
-
-  if (recognition) {
+  if (mediaRecorder && mediaRecorder.state !== "inactive") {
     try {
-      recognition.stop();
+      mediaRecorder.requestData();
+      mediaRecorder.stop();
     } catch (_error) {
       // No-op.
     }
   }
 
+  await transcriptionQueue.catch(() => null);
   try {
     await commitUsage();
   } catch (_error) {
@@ -650,7 +692,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   }
 
   if (message.type === "startDictation") {
-    startDictation(message.language)
+    startDictation()
       .then(() => sendResponse({ ok: true, state }))
       .catch((error) => sendResponse({ ok: false, error: error.message || "Unable to start dictation." }));
     return true;

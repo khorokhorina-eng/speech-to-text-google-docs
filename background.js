@@ -405,6 +405,36 @@ async function createCheckoutSession(planId, returnUrl) {
   };
 }
 
+async function transcribeAudio(message = {}) {
+  if (!isRemoteConfigured()) {
+    throw new Error("Configure the product backend before OpenAI transcription can run.");
+  }
+
+  const audioBase64 =
+    typeof message.audioBase64 === "string" ? message.audioBase64.trim() : "";
+  const mimeType =
+    typeof message.mimeType === "string" && message.mimeType.trim()
+      ? message.mimeType.trim()
+      : "audio/webm";
+
+  if (!audioBase64) {
+    throw new Error("Audio payload is missing.");
+  }
+
+  const data = await fetchJsonFromEndpoints("/transcribe", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      audioBase64,
+      mimeType,
+    }),
+  });
+
+  return {
+    text: typeof data.text === "string" ? data.text : "",
+  };
+}
+
 function getDefaultTabState() {
   return {
     connected: false,
@@ -618,6 +648,13 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     startDictation(message)
       .then((result) => sendResponse({ ok: true, ...result }))
       .catch((error) => sendResponse({ ok: false, error: error.message || "Failed to start dictation." }));
+    return true;
+  }
+
+  if (message.type === "transcribeAudio") {
+    transcribeAudio(message)
+      .then((result) => sendResponse({ ok: true, ...result }))
+      .catch((error) => sendResponse({ ok: false, error: error.message || "Failed to transcribe audio." }));
     return true;
   }
 

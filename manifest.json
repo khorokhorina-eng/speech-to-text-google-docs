@@ -1,6 +1,6 @@
 {
   "name": "Speech to Text for Google Docs",
-  "description": "Dictate into Google Docs with speech recognition, free trial minutes, and paid plans.",
+  "description": "Dictate into Google Docs with OpenAI transcription, free trial minutes, and paid plans.",
   "version": "1.1.0",
   "manifest_version": 3,
   "background": {

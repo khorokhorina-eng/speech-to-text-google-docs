@@ -43,6 +43,8 @@ const PORT = Number(process.env.PORT || 8787);
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
 const OPENAI_TTS_MODEL = process.env.OPENAI_TTS_MODEL || "gpt-4o-mini-tts";
 const OPENAI_TTS_VOICE = process.env.OPENAI_TTS_VOICE || "alloy";
+const OPENAI_TRANSCRIBE_MODEL =
+  process.env.OPENAI_TRANSCRIBE_MODEL || "gpt-4o-mini-transcribe";
 const FREE_MINUTES = Math.max(1, Number(process.env.FREE_MINUTES || 5));
 const CHAR_PER_MINUTE = Math.max(1, Number(process.env.CHAR_PER_MINUTE || 900));
 const PUBLIC_BASE_URL = (process.env.PUBLIC_BASE_URL || "").replace(/\/+$/, "");
@@ -582,6 +584,23 @@ function handleHealth(res) {
   sendJson(res, 200, { ok: true });
 }
 
+function guessAudioExtension(mimeType) {
+  const normalized = String(mimeType || "").toLowerCase();
+  if (normalized.includes("webm")) {
+    return "webm";
+  }
+  if (normalized.includes("mp4") || normalized.includes("m4a")) {
+    return "m4a";
+  }
+  if (normalized.includes("mpeg") || normalized.includes("mp3")) {
+    return "mp3";
+  }
+  if (normalized.includes("wav")) {
+    return "wav";
+  }
+  return "webm";
+}
+
 async function handleAuthMe(req, res, parsedUrl) {
   const deviceToken = getDeviceToken(req, parsedUrl, null);
   if (!deviceToken) {
@@ -1012,6 +1031,88 @@ async function handleUsage(req, res, parsedUrl) {
   });
 }
 
+async function handleTranscribe(req, res, parsedUrl) {
+  if (!OPENAI_API_KEY) {
+    sendJson(res, 500, { error: "OPENAI_API_KEY is not set." });
+    return;
+  }
+
+  let body;
+  try {
+    body = await parseJsonBody(req);
+  } catch (error) {
+    sendJson(res, 400, { error: error.message || "Invalid request body." });
+    return;
+  }
+
+  const deviceToken = getDeviceToken(req, parsedUrl, body);
+  if (!deviceToken) {
+    sendJson(res, 400, { error: "Missing device token." });
+    return;
+  }
+
+  const audioBase64 =
+    typeof body.audioBase64 === "string" ? body.audioBase64.trim() : "";
+  const mimeType =
+    typeof body.mimeType === "string" && body.mimeType.trim()
+      ? body.mimeType.trim()
+      : "audio/webm";
+
+  if (!audioBase64) {
+    sendJson(res, 400, { error: "audioBase64 is required." });
+    return;
+  }
+
+  let audioBuffer;
+  try {
+    audioBuffer = Buffer.from(audioBase64, "base64");
+  } catch (_error) {
+    sendJson(res, 400, { error: "Invalid audio payload." });
+    return;
+  }
+
+  if (!audioBuffer.length) {
+    sendJson(res, 400, { error: "Audio payload is empty." });
+    return;
+  }
+
+  try {
+    const form = new FormData();
+    form.append(
+      "file",
+      new Blob([audioBuffer], { type: mimeType }),
+      `dictation.${guessAudioExtension(mimeType)}`
+    );
+    form.append("model", OPENAI_TRANSCRIBE_MODEL);
+
+    const upstream = await fetch("https://api.openai.com/v1/audio/transcriptions", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${OPENAI_API_KEY}`,
+      },
+      body: form,
+    });
+
+    const payload = await upstream.json().catch(() => ({}));
+    if (!upstream.ok) {
+      sendJson(res, upstream.status, {
+        error:
+          payload?.error?.message ||
+          payload?.error ||
+          "OpenAI transcription request failed.",
+      });
+      return;
+    }
+
+    sendJson(res, 200, {
+      ok: true,
+      text: typeof payload?.text === "string" ? payload.text : "",
+    });
+  } catch (error) {
+    sendJson(res, 502, { error: error.message || "Failed to call OpenAI transcription." });
+  }
+}
+
 async function handleTts(req, res, parsedUrl) {
   if (!OPENAI_API_KEY) {
     sendJson(res, 500, { error: "OPENAI_API_KEY is not set." });
@@ -1189,6 +1290,11 @@ const server = http.createServer(async (req, res) => {
 
   if (req.method === "POST" && parsedUrl.pathname === "/tts") {
     await handleTts(req, res, parsedUrl);
+    return;
+  }
+
+  if (req.method === "POST" && parsedUrl.pathname === "/transcribe") {
+    await handleTranscribe(req, res, parsedUrl);
     return;
   }
 

@@ -8,7 +8,6 @@ const insertedCharsEl = document.getElementById("insertedChars");
 const startBtn = document.getElementById("start");
 const stopBtn = document.getElementById("stop");
 const openDocsBtn = document.getElementById("openDocs");
-const languageSelect = document.getElementById("language");
 const upgradeBtn = document.getElementById("upgrade");
 const pricingLinkBtn = document.getElementById("pricingLink");
 const contactBtn = document.getElementById("contact");
@@ -26,7 +25,6 @@ const authSignedInEl = document.getElementById("authSignedIn");
 const authGoogleBtn = document.getElementById("authGoogle");
 const authSignedInTextEl = document.getElementById("authSignedInText");
 const authSignOutBtn = document.getElementById("authSignOut");
-const DICTATION_LANGUAGE_KEY = "dictationLanguage";
 
 const state = {
   dictation: {
@@ -38,7 +36,7 @@ const state = {
     transcript: "",
     interimTranscript: "",
     docTitle: "",
-    language: "en-US",
+    language: "Auto",
     insertedChars: 0,
     sessionSeconds: 0,
   },
@@ -162,7 +160,6 @@ function updateDictationUI() {
   const isRunning = dictation.status === "listening" || dictation.status === "starting";
   startBtn.disabled = !dictation.isDocsPage || !dictation.supported || isRunning;
   stopBtn.disabled = !isRunning;
-  languageSelect.disabled = isRunning;
   openDocsBtn.hidden = dictation.isDocsPage;
 
   if (!dictation.isDocsPage) {
@@ -172,9 +169,6 @@ function updateDictationUI() {
     hintEl.textContent = "Click inside the Google Docs editor first, then start dictation.";
   }
 
-  if (dictation.language) {
-    languageSelect.value = dictation.language;
-  }
 }
 
 function updateUI() {
@@ -236,10 +230,8 @@ async function refreshDictationState() {
 
 async function startDictation() {
   try {
-    await writeStorage({ [DICTATION_LANGUAGE_KEY]: languageSelect.value });
     await sendRuntimeMessage({
       type: "startDictation",
-      language: languageSelect.value,
     });
     await refreshDictationState();
   } catch (error) {
@@ -294,17 +286,6 @@ async function signOut() {
     setPaywallStatus("Signed out. Sign in again before checkout.");
   } catch (error) {
     setPaywallStatus(error.message || "Unable to sign out.");
-  }
-}
-
-async function loadSavedLanguage() {
-  const result = await readStorage([DICTATION_LANGUAGE_KEY]);
-  const savedLanguage =
-    typeof result?.[DICTATION_LANGUAGE_KEY] === "string" ? result[DICTATION_LANGUAGE_KEY].trim() : "";
-  if (savedLanguage) {
-    languageSelect.value = savedLanguage;
-    state.dictation.language = savedLanguage;
-    updateUI();
   }
 }
 
@@ -420,12 +401,8 @@ authSignOutBtn.addEventListener("click", () => {
   signOut();
 });
 
-languageSelect.addEventListener("change", () => {
-  void writeStorage({ [DICTATION_LANGUAGE_KEY]: languageSelect.value });
-});
-
 updateUI();
-void Promise.all([loadSavedLanguage(), loadAuthState(), loadSubscriptionStatus(), refreshDictationState()]);
+void Promise.all([loadAuthState(), loadSubscriptionStatus(), refreshDictationState()]);
 setInterval(() => {
   refreshDictationState();
 }, 1500);
