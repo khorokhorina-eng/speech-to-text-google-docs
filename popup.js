@@ -158,7 +158,7 @@ function updateDictationUI() {
     startBtn.disabled = true;
     hintEl.textContent = "Open a Google Docs document first.";
   } else if (dictation.status === "idle" && !dictation.cursorReady) {
-    hintEl.textContent = "Click inside the Google Docs editor first, then start dictation.";
+    hintEl.textContent = "Click inside the Google Docs editor, then record your voice.";
   }
 
 }

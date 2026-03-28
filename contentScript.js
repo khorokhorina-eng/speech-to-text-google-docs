@@ -15,7 +15,7 @@ const state = {
   isDocsPage: location.href.startsWith("https://docs.google.com/document/"),
   status: HAS_RECORDING_SUPPORT ? "idle" : "unsupported",
   message: HAS_RECORDING_SUPPORT
-    ? "Place the cursor in Google Docs, then start AI dictation."
+    ? "Place the cursor in Google Docs, record your voice, then paste the transcript into the document."
     : "This browser does not support microphone recording for this extension.",
   transcript: "",
   interimTranscript: "",
@@ -864,7 +864,7 @@ async function flushPendingInsertion() {
   const inserted = insertTextIntoDocument(pending);
   if (!inserted) {
     showTranscriptOverlay(pending);
-    setStatus("idle", "Google Docs blocked direct insertion. The exact transcript is shown on the page.");
+    setStatus("idle", "Transcript ready. Copy it from the page card and paste it into Google Docs.");
     sendStateUpdate();
     return false;
   }
@@ -905,7 +905,7 @@ async function handleTranscriptionText(text) {
     showTranscriptOverlay(normalizedTranscript);
     setStatus(
       desiredRunning && mediaRecorder ? "listening" : "idle",
-      "Google Docs blocked direct insertion. The exact transcript is shown on the page."
+      "Transcript ready. Copy it from the page card and paste it into Google Docs."
     );
     return;
   }
@@ -914,7 +914,7 @@ async function handleTranscriptionText(text) {
   state.insertedChars += normalizedTranscript.length;
   state.interimTranscript = "";
   insertionHistory.push(normalizedTranscript);
-  setStatus("idle", "Text inserted into Google Docs.");
+  setStatus("idle", "Transcript is ready.");
   sendStateUpdate();
 }
 
@@ -1094,7 +1094,7 @@ async function startDictation() {
       }
       sessionAudioChunks.push(event.data);
     };
-    setStatus("listening", "Recording your voice. Press Stop to transcribe and insert text.");
+    setStatus("listening", "Recording your voice. Press Stop to prepare the transcript.");
   } catch (error) {
     desiredRunning = false;
     clearQuotaTimer();
@@ -1110,7 +1110,7 @@ async function stopDictation() {
   desiredRunning = false;
   clearQuotaTimer();
   state.interimTranscript = "";
-  setStatus("starting", "Transcribing and inserting text...");
+  setStatus("starting", "Transcribing your recording...");
   if (mediaRecorder && mediaRecorder.state !== "inactive") {
     recorderStopPromise =
       recorderStopPromise ||

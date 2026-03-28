@@ -22,7 +22,7 @@
           <span class="live-dot" aria-hidden="true"></span>
         </div>
         <p id="hint" class="hint">
-          Open a Google Docs document, click where you want text to appear, then start dictation. The text will be inserted after you press Stop.
+          Record your voice, review the transcript, then paste it into Google Docs with Cmd+V.
         </p>
       </section>
 
@@ -35,9 +35,14 @@
       </section>
 
       <section class="controls-panel">
-        <button id="start" class="primary">Start dictation</button>
+        <div class="flow-note">
+          <span>1. Record</span>
+          <span>2. Review</span>
+          <span>3. Paste into Docs</span>
+        </div>
+        <button id="start" class="primary">Start recording</button>
         <div class="controls-row">
-          <button id="stop" class="secondary" disabled>Stop</button>
+          <button id="stop" class="secondary" disabled>Stop and transcribe</button>
         </div>
         <button id="openDocs" class="secondary docs-btn">Open Google Docs</button>
       </section>
