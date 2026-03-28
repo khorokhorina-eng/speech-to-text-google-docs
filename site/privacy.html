@@ -32,6 +32,7 @@
           <ul class="list">
             <li>Records microphone audio while the user dictates in Google Docs.</li>
             <li>Sends audio and product data to the product backend for OpenAI transcription, account state, and billing.</li>
+            <li>Shows the resulting transcript in the extension workflow so the user can review, copy, and paste it into Google Docs.</li>
             <li>Stores a device token and limited billing state to manage free usage, subscriptions, and purchases.</li>
             <li>Uses Google sign-in before checkout so a paid plan can be attached to the account.</li>
           </ul>
@@ -41,7 +42,7 @@
           <h3>What data is processed</h3>
           <ul class="list">
             <li>Audio captured from the microphone while dictation is active.</li>
-            <li>Transcription text inserted into Google Docs while the extension is active.</li>
+            <li>Transcript text returned from OpenAI transcription and shown to the user for copy/paste into Google Docs.</li>
             <li>A device token used to identify usage limits and subscription state.</li>
             <li>Billing-related identifiers when a user starts or manages a paid plan through Stripe.</li>
             <li>Support request details if the user contacts support.</li>

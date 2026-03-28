@@ -281,6 +281,8 @@ button:disabled {
 
 .paywall-sheet {
   width: 100%;
+  max-height: calc(100vh - 28px);
+  overflow-y: auto;
   padding: 16px;
   display: grid;
   gap: 14px;
@@ -325,6 +327,7 @@ button:disabled {
   justify-content: space-between;
   gap: 8px;
   align-items: flex-end;
+  min-height: 146px;
   padding: 18px 16px 14px;
   border-radius: 28px;
 }
@@ -405,5 +408,5 @@ button:disabled {
 }
 
 .plan-card.featured .plan-eyebrow {
-  top: 62px;
+  top: 52px;
 }

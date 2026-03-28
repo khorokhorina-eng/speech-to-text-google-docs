@@ -6,29 +6,30 @@ Speech to Text for Google Docs
 
 ## Short Description
 
-Dictate into Google Docs with voice typing, trial minutes, Google sign-in, and paid plans.
+Record speech, transcribe it with OpenAI, then copy and paste the text into Google Docs.
 
 ## Detailed Description
 
-Speech to Text for Google Docs helps you turn spoken words into text while working directly inside Google Docs.
+Speech to Text for Google Docs helps you turn spoken words into text while working with Google Docs.
 
 Use it to:
 
 - dictate notes, drafts, and outlines without typing
-- keep your cursor inside Google Docs and insert text where you are already working
-- switch languages for dictation sessions
-- use voice-friendly punctuation commands such as `comma`, `period`, `new line`, and `new paragraph`
+- transcribe short recordings into ready-to-paste text
+- review the transcript, copy it, and paste it into Google Docs
+- use voice-friendly punctuation commands such as `comma`, `period`, and `new paragraph`
 
 How it works:
 
 - open a Google Docs document
-- place the cursor where text should appear
-- start dictation from the extension popup
-- speak and review the live transcript while text is inserted into the document
+- start recording from the extension popup
+- stop and wait for transcription
+- review the transcript and copy it
+- paste the text into Google Docs
 
 Account and billing:
 
-- includes 5 free minutes of dictation
+- includes 10 free minutes of dictation
 - continued use requires a paid plan
 - Google sign-in is required before checkout
 - billing is handled through Stripe
@@ -42,4 +43,4 @@ This extension is designed for Google Docs workflows and is intended for writing
 
 ## Privacy Disclosure
 
-This extension processes account, billing, and usage-limit data through `voicetext.world` to support free trial limits, Google sign-in, subscription status, and Stripe checkout. Support contact: `hello@voicetext.world`.
+This extension processes microphone audio, transcript text, account, billing, and usage-limit data through `voicetext.world` to support OpenAI transcription, free trial limits, Google sign-in, subscription status, and Stripe checkout. Support contact: `hello@voicetext.world`.
