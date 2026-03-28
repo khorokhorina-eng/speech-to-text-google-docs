@@ -8,6 +8,7 @@ const RECORDER_MIME_CANDIDATES = [
 ];
 const REMOTE_API_BASE_URL = "https://voicetext.world";
 const DEVICE_TOKEN_KEY = "deviceToken";
+const MAX_RECORDING_SECONDS = 60;
 
 const state = {
   connected: true,
@@ -1041,6 +1042,8 @@ async function startDictation() {
   };
 
   markSessionStart();
+  const recordingSecondsLimit = Math.min(Number(quota.remainingSeconds), MAX_RECORDING_SECONDS);
+
   quotaTimer = setTimeout(async () => {
     desiredRunning = false;
     try {
@@ -1081,8 +1084,8 @@ async function startDictation() {
       setStatus("error", error.message || "Unable to finish transcription.");
     });
     await commitUsage().catch(() => null);
-    setStatus("error", "Dictation limit reached. Upgrade to continue.");
-  }, Number(quota.remainingSeconds) * 1000);
+    setStatus("error", "60-second recording limit reached. Transcribe and start a new recording.");
+  }, recordingSecondsLimit * 1000);
 
   setStatus("starting", "Starting AI dictation...");
   try {
@@ -1094,7 +1097,7 @@ async function startDictation() {
       }
       sessionAudioChunks.push(event.data);
     };
-    setStatus("listening", "Recording your voice. Press Stop to prepare the transcript.");
+    setStatus("listening", "Recording your voice. Each recording can be up to 60 seconds.");
   } catch (error) {
     desiredRunning = false;
     clearQuotaTimer();

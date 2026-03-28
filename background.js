@@ -1,6 +1,6 @@
 const REMOTE_API_BASE_URL = "https://voicetext.world";
 const BILLING_ENDPOINTS = [REMOTE_API_BASE_URL];
-const FREE_MINUTES = 5;
+const FREE_MINUTES = 10;
 const DEVICE_TOKEN_KEY = "deviceToken";
 const AUTH_SESSION_KEY = "authSession";
 const LOCAL_TRIAL_STATE_KEY = "localTrialState";

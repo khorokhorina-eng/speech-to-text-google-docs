@@ -167,6 +167,18 @@ body[data-status="error"] .live-dot {
   color: var(--muted);
 }
 
+.countdown {
+  justify-self: start;
+  padding: 6px 10px;
+  border-radius: 999px;
+  background: #fff1ee;
+  border: 1px solid rgba(176, 59, 40, 0.18);
+  font-family: "Helvetica Neue", Arial, sans-serif;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--danger);
+}
+
 .controls-row {
   display: grid;
   grid-template-columns: 1fr auto;
@@ -312,14 +324,21 @@ button:disabled {
   display: flex;
   justify-content: space-between;
   gap: 10px;
-  align-items: center;
-  padding: 14px;
+  align-items: flex-end;
+  padding: 22px 18px 18px;
+  border-radius: 34px;
 }
 
 .plan-card.selected,
 .plan-card.featured {
-  border-color: rgba(29, 92, 255, 0.35);
-  box-shadow: 0 16px 34px rgba(20, 62, 179, 0.12);
+  border-color: rgba(24, 20, 13, 0.24);
+  box-shadow: 0 16px 34px rgba(41, 27, 13, 0.1);
+}
+
+.plan-card.featured {
+  background:
+    radial-gradient(circle at top center, rgba(224, 132, 64, 0.12), transparent 48%),
+    var(--panel-strong);
 }
 
 .plan-main,
@@ -328,7 +347,11 @@ button:disabled {
   gap: 3px;
 }
 
-.plan-name,
+.plan-main {
+  align-content: end;
+}
+
+.plan-eyebrow,
 .plan-total,
 .plan-day-price,
 .plan-day-period,
@@ -336,36 +359,51 @@ button:disabled {
   font-family: "Helvetica Neue", Arial, sans-serif;
 }
 
-.plan-name {
-  font-size: 12px;
-  letter-spacing: 0.08em;
+.plan-eyebrow {
+  position: absolute;
+  left: 18px;
+  top: 18px;
+  font-size: 14px;
+  font-weight: 900;
+  letter-spacing: -0.02em;
+  color: var(--ink);
 }
 
 .plan-total {
-  font-size: 15px;
+  font-size: 18px;
   font-weight: 700;
+  color: #6f655a;
 }
 
 .plan-day-price {
-  font-size: 24px;
-  font-weight: 700;
+  font-size: 58px;
+  line-height: 0.9;
+  font-weight: 900;
   text-align: right;
+  letter-spacing: -0.06em;
 }
 
 .plan-day-period {
-  font-size: 10px;
+  font-size: 14px;
+  font-weight: 900;
   color: var(--muted);
   text-align: right;
+  letter-spacing: 0.02em;
 }
 
 .plan-badge {
   position: absolute;
-  top: -8px;
-  left: 14px;
-  padding: 4px 8px;
+  top: 14px;
+  left: 18px;
+  padding: 10px 16px;
   border-radius: 999px;
-  background: var(--accent-soft);
-  color: var(--accent-deep);
-  font-size: 10px;
-  font-weight: 700;
+  background: #be5d23;
+  color: #fff;
+  font-size: 12px;
+  font-weight: 900;
+  letter-spacing: 0.01em;
+}
+
+.plan-card.featured .plan-eyebrow {
+  top: 78px;
 }

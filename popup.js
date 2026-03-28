@@ -2,6 +2,7 @@ const statusEl = document.getElementById("status");
 const hintEl = document.getElementById("hint");
 const docTitleEl = document.getElementById("docTitle");
 const quotaEl = document.getElementById("quota");
+const countdownEl = document.getElementById("countdown");
 const startBtn = document.getElementById("start");
 const stopBtn = document.getElementById("stop");
 const openDocsBtn = document.getElementById("openDocs");
@@ -66,6 +67,7 @@ const STATUS_LABELS = {
   unsupported: "Unsupported",
   error: "Needs attention",
 };
+const MAX_RECORDING_SECONDS = 60;
 
 function sendRuntimeMessage(message) {
   return new Promise((resolve, reject) => {
@@ -153,6 +155,15 @@ function updateDictationUI() {
   startBtn.disabled = !dictation.isDocsPage || !dictation.supported || isRunning;
   stopBtn.disabled = !isRunning;
   openDocsBtn.hidden = dictation.isDocsPage;
+
+  if (isRunning) {
+    const elapsedSeconds = Math.max(0, Number(dictation.sessionSeconds) || 0);
+    const remainingSeconds = Math.max(0, MAX_RECORDING_SECONDS - elapsedSeconds);
+    countdownEl.textContent = `${remainingSeconds}s left`;
+    countdownEl.classList.remove("hidden");
+  } else {
+    countdownEl.classList.add("hidden");
+  }
 
   if (!dictation.isDocsPage) {
     startBtn.disabled = true;

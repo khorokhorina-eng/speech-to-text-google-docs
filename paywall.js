@@ -61,7 +61,7 @@ async function loadAuthState() {
   authSignedInTextEl.textContent = authState.signedIn ? `Signed in as ${authState.email}` : "";
   authMessageEl.textContent = authState.signedIn
     ? ""
-    : "Use your 5 free minutes first. Sign in with Google when you want to buy a plan.";
+    : "Use your 10 free minutes first. Sign in with Google when you want to buy a plan.";
   updateButtons();
 }
 

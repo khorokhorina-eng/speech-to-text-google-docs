@@ -22,7 +22,7 @@
           <span class="live-dot" aria-hidden="true"></span>
         </div>
         <p id="hint" class="hint">
-          Record your voice, review the transcript, then paste it into Google Docs with Cmd+V.
+          Record up to 60 seconds, review the transcript, then paste it into Google Docs with Cmd+V.
         </p>
       </section>
 
@@ -31,7 +31,7 @@
           <p class="doc-label">Current document</p>
           <p id="docTitle" class="doc-title">No active Google Docs tab</p>
         </div>
-        <p id="quota" class="quota">5 free minutes included</p>
+        <p id="quota" class="quota">10 free minutes included</p>
       </section>
 
       <section class="controls-panel">
@@ -40,6 +40,7 @@
           <span>2. Review</span>
           <span>3. Paste into Docs</span>
         </div>
+        <div id="countdown" class="countdown hidden">60s left</div>
         <button id="start" class="primary">Start recording</button>
         <div class="controls-row">
           <button id="stop" class="secondary" disabled>Stop and transcribe</button>
@@ -86,24 +87,24 @@
         </section>
         <div id="paywallPlans" class="paywall-plans">
           <button class="plan-card selected" data-plan-id="monthly">
+            <span class="plan-eyebrow">1-MONTH PLAN</span>
             <span class="plan-main">
-              <span class="plan-name">MONTHLY</span>
               <span class="plan-total">$9.99 per month</span>
             </span>
             <span class="plan-side">
-              <span class="plan-day-price">300</span>
-              <span class="plan-day-period">MIN / MONTH</span>
+              <span class="plan-day-price">$0.33</span>
+              <span class="plan-day-period">PER DAY</span>
             </span>
           </button>
           <button class="plan-card featured" data-plan-id="annual">
-            <span class="plan-badge accent-badge">BEST VALUE</span>
+            <span class="plan-badge accent-badge">MOST POPULAR</span>
+            <span class="plan-eyebrow">12-MONTH PLAN</span>
             <span class="plan-main">
-              <span class="plan-name">ANNUAL</span>
               <span class="plan-total">$89.99 per year</span>
             </span>
             <span class="plan-side">
-              <span class="plan-day-price">60</span>
-              <span class="plan-day-period">HOURS / YEAR</span>
+              <span class="plan-day-price">$0.25</span>
+              <span class="plan-day-period">PER DAY</span>
             </span>
           </button>
         </div>
