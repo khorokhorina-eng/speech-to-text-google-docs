@@ -314,7 +314,7 @@ button:disabled {
 
 .paywall-plans {
   display: grid;
-  gap: 10px;
+  gap: 8px;
 }
 
 .plan-card {
@@ -323,10 +323,10 @@ button:disabled {
   text-align: left;
   display: flex;
   justify-content: space-between;
-  gap: 10px;
+  gap: 8px;
   align-items: flex-end;
-  padding: 22px 18px 18px;
-  border-radius: 34px;
+  padding: 18px 16px 14px;
+  border-radius: 28px;
 }
 
 .plan-card.selected,
@@ -361,22 +361,22 @@ button:disabled {
 
 .plan-eyebrow {
   position: absolute;
-  left: 18px;
-  top: 18px;
-  font-size: 14px;
+  left: 16px;
+  top: 16px;
+  font-size: 12px;
   font-weight: 900;
   letter-spacing: -0.02em;
   color: var(--ink);
 }
 
 .plan-total {
-  font-size: 18px;
+  font-size: 15px;
   font-weight: 700;
   color: #6f655a;
 }
 
 .plan-day-price {
-  font-size: 58px;
+  font-size: 48px;
   line-height: 0.9;
   font-weight: 900;
   text-align: right;
@@ -384,7 +384,7 @@ button:disabled {
 }
 
 .plan-day-period {
-  font-size: 14px;
+  font-size: 12px;
   font-weight: 900;
   color: var(--muted);
   text-align: right;
@@ -393,17 +393,17 @@ button:disabled {
 
 .plan-badge {
   position: absolute;
-  top: 14px;
-  left: 18px;
-  padding: 10px 16px;
+  top: 12px;
+  left: 16px;
+  padding: 8px 12px;
   border-radius: 999px;
   background: #be5d23;
   color: #fff;
-  font-size: 12px;
+  font-size: 11px;
   font-weight: 900;
   letter-spacing: 0.01em;
 }
 
 .plan-card.featured .plan-eyebrow {
-  top: 78px;
+  top: 62px;
 }
