@@ -73,7 +73,6 @@ body {
 .status-panel,
 .doc-panel,
 .controls-panel,
-.transcript-panel,
 .account-panel,
 .paywall-sheet {
   border: 1px solid var(--line);
@@ -84,7 +83,6 @@ body {
 
 .status-panel,
 .doc-panel,
-.transcript-panel,
 .account-panel {
   padding: 12px 14px;
 }
@@ -110,8 +108,6 @@ body {
 .hint,
 .doc-title,
 .quota,
-.transcript,
-.panel-note,
 .account-state,
 .auth-message,
 .auth-signed-in-text,
@@ -127,7 +123,6 @@ body {
 .account-state,
 .auth-message,
 .auth-signed-in-text,
-.transcript,
 .quota {
   color: var(--ink);
 }
@@ -228,26 +223,6 @@ button:disabled {
   min-height: 40px;
   border-radius: 999px;
   color: var(--accent-deep);
-}
-
-.transcript {
-  min-height: 36px;
-}
-
-.session-meta {
-  margin-top: 8px;
-  display: flex;
-  justify-content: space-between;
-  gap: 10px;
-  font-family: "Helvetica Neue", Arial, sans-serif;
-  font-size: 11px;
-  font-weight: 700;
-  color: var(--muted);
-}
-
-.panel-note {
-  margin-top: 8px;
-  color: var(--muted);
 }
 
 .docs-btn {

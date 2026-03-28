@@ -81,6 +81,10 @@ const GOOGLE_STATE_TTL_MS = 10 * 60 * 1000;
 
 const stripe = STRIPE_SECRET_KEY ? new Stripe(STRIPE_SECRET_KEY) : null;
 
+function roundUsageMinutes(value) {
+  return Math.max(0, Math.round(Number(value || 0) * 100) / 100);
+}
+
 function nowIso() {
   return new Date().toISOString();
 }
@@ -148,7 +152,7 @@ function setCorsHeaders(res) {
   res.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
   res.setHeader(
     "Access-Control-Allow-Headers",
-    "Content-Type, Authorization, Stripe-Signature, x-device-token"
+    "Content-Type, Authorization, Stripe-Signature, x-device-token, x-audio-mime"
   );
 }
 
@@ -207,14 +211,14 @@ function sanitizeExtensionReturnUrl(value) {
   }
 }
 
-function readBody(req) {
+function readBody(req, maxBytes = 2 * 1024 * 1024) {
   return new Promise((resolve, reject) => {
     const chunks = [];
     let totalSize = 0;
 
     req.on("data", (chunk) => {
       totalSize += chunk.length;
-      if (totalSize > 2 * 1024 * 1024) {
+      if (totalSize > maxBytes) {
         reject(new Error("Payload too large."));
         return;
       }
@@ -241,6 +245,10 @@ async function parseJsonBody(req) {
   } catch (_error) {
     throw new Error("Invalid JSON payload.");
   }
+}
+
+async function readBinaryBody(req, maxBytes = 12 * 1024 * 1024) {
+  return readBody(req, maxBytes);
 }
 
 function getPlanById(planId) {
@@ -332,7 +340,7 @@ function getOrCreateDeviceUsage(state, deviceToken) {
   if (!Number.isFinite(Number(usage.minutesLeft))) {
     usage.minutesLeft = FREE_MINUTES;
   }
-  usage.minutesLeft = Math.max(0, Math.floor(Number(usage.minutesLeft)));
+  usage.minutesLeft = roundUsageMinutes(usage.minutesLeft);
   usage.updatedAt = usage.updatedAt || nowIso();
   usage.createdAt = usage.createdAt || nowIso();
   return usage;
@@ -430,7 +438,7 @@ function getOrCreateAccountPeriodUsage(state, accountId, subscription) {
   usage.planId = subscription.plan.planId || usage.planId || null;
   usage.subscriptionId = subscription.plan.subscriptionId || usage.subscriptionId || null;
   usage.periodEnd = subscription.plan.currentPeriodEnd || usage.periodEnd || null;
-  usage.minutesUsed = Math.max(0, Math.floor(Number(usage.minutesUsed) || 0));
+  usage.minutesUsed = roundUsageMinutes(usage.minutesUsed);
   usage.updatedAt = usage.updatedAt || nowIso();
   usage.createdAt = usage.createdAt || nowIso();
   return usage;
@@ -1002,7 +1010,7 @@ async function handleUsage(req, res, parsedUrl) {
   }
 
   const seconds = Math.max(0, Number(body.seconds) || 0);
-  const usageCost = Math.max(1, Math.ceil(seconds / 60));
+  const usageCost = roundUsageMinutes(seconds / 60);
 
   const state = readState();
   const account = getAccountForDevice(state, deviceToken);
@@ -1085,13 +1093,17 @@ async function handleTranscribe(req, res, parsedUrl) {
     );
     form.append("model", OPENAI_TRANSCRIBE_MODEL);
 
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 45000);
     const upstream = await fetch("https://api.openai.com/v1/audio/transcriptions", {
       method: "POST",
       headers: {
         Authorization: `Bearer ${OPENAI_API_KEY}`,
       },
       body: form,
+      signal: controller.signal,
     });
+    clearTimeout(timeoutId);
 
     const payload = await upstream.json().catch(() => ({}));
     if (!upstream.ok) {
@@ -1109,7 +1121,88 @@ async function handleTranscribe(req, res, parsedUrl) {
       text: typeof payload?.text === "string" ? payload.text : "",
     });
   } catch (error) {
-    sendJson(res, 502, { error: error.message || "Failed to call OpenAI transcription." });
+    sendJson(res, 502, {
+      error:
+        error?.name === "AbortError"
+          ? "OpenAI transcription timed out. Please try a shorter recording."
+          : error.message || "Failed to call OpenAI transcription.",
+    });
+  }
+}
+
+async function handleTranscribeRaw(req, res, parsedUrl) {
+  if (!OPENAI_API_KEY) {
+    sendJson(res, 500, { error: "OPENAI_API_KEY is not set." });
+    return;
+  }
+
+  const deviceToken = getDeviceToken(req, parsedUrl, null);
+  if (!deviceToken) {
+    sendJson(res, 400, { error: "Missing device token." });
+    return;
+  }
+
+  const mimeType =
+    typeof req.headers["x-audio-mime"] === "string" && req.headers["x-audio-mime"].trim()
+      ? req.headers["x-audio-mime"].trim()
+      : "audio/webm";
+
+  let audioBuffer;
+  try {
+    audioBuffer = await readBinaryBody(req);
+  } catch (error) {
+    sendJson(res, 400, { error: error.message || "Invalid audio payload." });
+    return;
+  }
+
+  if (!audioBuffer?.length) {
+    sendJson(res, 400, { error: "Audio payload is empty." });
+    return;
+  }
+
+  try {
+    const form = new FormData();
+    form.append(
+      "file",
+      new Blob([audioBuffer], { type: mimeType }),
+      `dictation.${guessAudioExtension(mimeType)}`
+    );
+    form.append("model", OPENAI_TRANSCRIBE_MODEL);
+
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 45000);
+    const upstream = await fetch("https://api.openai.com/v1/audio/transcriptions", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${OPENAI_API_KEY}`,
+      },
+      body: form,
+      signal: controller.signal,
+    });
+    clearTimeout(timeoutId);
+
+    const payload = await upstream.json().catch(() => ({}));
+    if (!upstream.ok) {
+      sendJson(res, upstream.status, {
+        error:
+          payload?.error?.message ||
+          payload?.error ||
+          "OpenAI transcription request failed.",
+      });
+      return;
+    }
+
+    sendJson(res, 200, {
+      ok: true,
+      text: typeof payload?.text === "string" ? payload.text : "",
+    });
+  } catch (error) {
+    sendJson(res, 502, {
+      error:
+        error?.name === "AbortError"
+          ? "OpenAI transcription timed out. Please try a shorter recording."
+          : error.message || "Failed to call OpenAI transcription.",
+    });
   }
 }
 
@@ -1295,6 +1388,11 @@ const server = http.createServer(async (req, res) => {
 
   if (req.method === "POST" && parsedUrl.pathname === "/transcribe") {
     await handleTranscribe(req, res, parsedUrl);
+    return;
+  }
+
+  if (req.method === "POST" && parsedUrl.pathname === "/transcribe-raw") {
+    await handleTranscribeRaw(req, res, parsedUrl);
     return;
   }
 

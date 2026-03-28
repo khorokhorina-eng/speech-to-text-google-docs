@@ -63,14 +63,28 @@ async function fetchJsonFromEndpoints(pathname, options = {}) {
 
   for (const baseUrl of BILLING_ENDPOINTS) {
     try {
+      const timeoutMs = Math.max(0, Number(options.timeoutMs) || 0);
       const headers = {
         ...(options.headers || {}),
         "x-device-token": deviceToken,
       };
-      const response = await fetch(`${baseUrl}${pathname}`, {
+      const requestOptions = {
         ...options,
         headers,
-      });
+      };
+      delete requestOptions.timeoutMs;
+
+      let timeoutId = null;
+      const abortController = timeoutMs ? new AbortController() : null;
+      if (abortController) {
+        requestOptions.signal = abortController.signal;
+        timeoutId = setTimeout(() => abortController.abort(), timeoutMs);
+      }
+
+      const response = await fetch(`${baseUrl}${pathname}`, requestOptions);
+      if (timeoutId) {
+        clearTimeout(timeoutId);
+      }
       const text = await response.text();
       let data = {};
       if (text) {
@@ -87,7 +101,10 @@ async function fetchJsonFromEndpoints(pathname, options = {}) {
 
       return data;
     } catch (error) {
-      lastError = error;
+      lastError =
+        error?.name === "AbortError"
+          ? new Error("Transcription timed out. Please try a shorter recording.")
+          : error;
     }
   }
 
@@ -424,6 +441,7 @@ async function transcribeAudio(message = {}) {
   const data = await fetchJsonFromEndpoints("/transcribe", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
+    timeoutMs: 45000,
     body: JSON.stringify({
       audioBase64,
       mimeType,
@@ -494,6 +512,33 @@ function sendMessageToTab(tabId, message) {
   });
 }
 
+function executeScript(tabId, files) {
+  return new Promise((resolve, reject) => {
+    chrome.scripting.executeScript(
+      {
+        target: { tabId },
+        files,
+      },
+      () => {
+        if (chrome.runtime.lastError) {
+          reject(new Error(chrome.runtime.lastError.message));
+          return;
+        }
+        resolve();
+      }
+    );
+  });
+}
+
+async function ensureDocsContentScript(tabId) {
+  try {
+    await sendMessageToTab(tabId, { type: "getDictationState" });
+    return;
+  } catch (_error) {
+    await executeScript(tabId, ["contentScript.js"]);
+  }
+}
+
 async function getDictationState() {
   const tab = await queryActiveTab();
   if (!tab?.id) {
@@ -511,6 +556,7 @@ async function getDictationState() {
   }
 
   try {
+    await ensureDocsContentScript(tab.id);
     const response = await sendMessageToTab(tab.id, { type: "getDictationState" });
     const nextState = {
       ...defaultState,
@@ -539,11 +585,9 @@ async function startDictation(payload = {}) {
     throw new Error("Free trial used. Upgrade to continue dictation.");
   }
 
+  await ensureDocsContentScript(tab.id);
   const response = await sendMessageToTab(tab.id, {
     type: "startDictation",
-    language: typeof payload.language === "string" && payload.language.trim()
-      ? payload.language.trim()
-      : "en-US",
   });
 
   return {

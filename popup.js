@@ -2,9 +2,6 @@ const statusEl = document.getElementById("status");
 const hintEl = document.getElementById("hint");
 const docTitleEl = document.getElementById("docTitle");
 const quotaEl = document.getElementById("quota");
-const transcriptEl = document.getElementById("transcript");
-const sessionTimeEl = document.getElementById("sessionTime");
-const insertedCharsEl = document.getElementById("insertedChars");
 const startBtn = document.getElementById("start");
 const stopBtn = document.getElementById("stop");
 const openDocsBtn = document.getElementById("openDocs");
@@ -151,11 +148,6 @@ function updateDictationUI() {
   statusEl.textContent = STATUS_LABELS[dictation.status] || "Ready";
   hintEl.textContent = dictation.message || " ";
   docTitleEl.textContent = dictation.docTitle || "No active Google Docs tab";
-
-  const transcript = [dictation.transcript, dictation.interimTranscript].filter(Boolean).join(" ");
-  transcriptEl.textContent = transcript || "Dictated text will appear here while you speak.";
-  sessionTimeEl.textContent = `${Math.max(0, Number(dictation.sessionSeconds) || 0)}s`;
-  insertedCharsEl.textContent = `${Math.max(0, Number(dictation.insertedChars) || 0)} characters inserted`;
 
   const isRunning = dictation.status === "listening" || dictation.status === "starting";
   startBtn.disabled = !dictation.isDocsPage || !dictation.supported || isRunning;

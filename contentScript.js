@@ -1,12 +1,13 @@
 const HAS_RECORDING_SUPPORT = Boolean(
   navigator.mediaDevices?.getUserMedia && window.MediaRecorder
 );
-const RECORDER_TIMESLICE_MS = 4000;
 const RECORDER_MIME_CANDIDATES = [
   "audio/webm;codecs=opus",
   "audio/webm",
   "audio/mp4",
 ];
+const REMOTE_API_BASE_URL = "https://voicetext.world";
+const DEVICE_TOKEN_KEY = "deviceToken";
 
 const state = {
   connected: true,
@@ -57,10 +58,25 @@ let quotaTimer = null;
 let sessionSecondsTimer = null;
 let lastErrorMessage = "";
 let unloadCommitStarted = false;
+let usageCommittedForSession = false;
 let lastFocusedTarget = null;
+let lastKnownSelectionRange = null;
 let iframeListenersBound = false;
 let transcriptionQueue = Promise.resolve();
+let pendingInsertionText = "";
+let sessionAudioChunks = [];
+let recorderStopPromise = null;
+let transcriptOverlay = null;
 const insertionHistory = [];
+
+function withTimeout(promise, timeoutMs, message) {
+  return Promise.race([
+    promise,
+    new Promise((_, reject) => {
+      setTimeout(() => reject(new Error(message)), timeoutMs);
+    }),
+  ]);
+}
 
 function sendStateUpdate() {
   chrome.runtime.sendMessage({
@@ -92,6 +108,33 @@ function clearSessionSecondsTimer() {
   }
 }
 
+function isTextInputTarget(target) {
+  return (
+    target instanceof HTMLTextAreaElement ||
+    (target instanceof HTMLInputElement && /^(text|search|url|email|tel)$/i.test(target.type))
+  );
+}
+
+function isValidInsertionTarget(target) {
+  if (!target) {
+    return false;
+  }
+
+  if (isTextInputTarget(target)) {
+    return true;
+  }
+
+  if (target instanceof HTMLElement && target.isContentEditable) {
+    return true;
+  }
+
+  if (target.ownerDocument && target.ownerDocument !== document) {
+    return true;
+  }
+
+  return false;
+}
+
 function sendRuntimeMessage(message) {
   return new Promise((resolve, reject) => {
     chrome.runtime.sendMessage(message, (response) => {
@@ -106,6 +149,32 @@ function sendRuntimeMessage(message) {
       resolve(response);
     });
   });
+}
+
+function readStorage(keys) {
+  return new Promise((resolve) => {
+    chrome.storage.local.get(keys, (result) => resolve(result || {}));
+  });
+}
+
+function writeStorage(payload) {
+  return new Promise((resolve) => {
+    chrome.storage.local.set(payload, () => resolve());
+  });
+}
+
+async function getOrCreateDeviceToken() {
+  const result = await readStorage([DEVICE_TOKEN_KEY]);
+  const existing = typeof result?.[DEVICE_TOKEN_KEY] === "string" ? result[DEVICE_TOKEN_KEY] : "";
+  if (existing) {
+    return existing;
+  }
+
+  const created =
+    (self.crypto && self.crypto.randomUUID && self.crypto.randomUUID()) ||
+    `device_${Date.now()}_${Math.random().toString(16).slice(2)}`;
+  await writeStorage({ [DEVICE_TOKEN_KEY]: created });
+  return created;
 }
 
 function getPreferredRecorderMimeType() {
@@ -136,14 +205,82 @@ function releaseMicrophone() {
   mediaStream = null;
 }
 
+function getPendingInsertionText() {
+  return pendingInsertionText.trim();
+}
+
+function enqueuePendingInsertion(text) {
+  const normalized = String(text || "").trim();
+  if (!normalized) {
+    return;
+  }
+  pendingInsertionText = `${pendingInsertionText} ${normalized}`.trim();
+}
+
+function clearPendingInsertion() {
+  pendingInsertionText = "";
+  removeTranscriptOverlay();
+}
+
+function resetSessionAudio() {
+  sessionAudioChunks = [];
+}
+
+function buildSessionAudioBlob() {
+  if (!sessionAudioChunks.length) {
+    return null;
+  }
+  const mimeType = sessionAudioChunks[0]?.type || "audio/webm";
+  return new Blob(sessionAudioChunks, { type: mimeType });
+}
+
 function rememberFocusedTarget(target) {
-  if (!target) {
+  if (!target || !isValidInsertionTarget(target)) {
     return;
   }
 
   lastFocusedTarget = target;
+  captureSelection(target);
   state.cursorReady = true;
   sendStateUpdate();
+}
+
+function captureSelection(target) {
+  const ownerDocument = target?.ownerDocument || document;
+  const ownerWindow = ownerDocument.defaultView || window;
+  const selection = ownerWindow.getSelection ? ownerWindow.getSelection() : null;
+  if (!selection || !selection.rangeCount) {
+    return false;
+  }
+
+  try {
+    lastKnownSelectionRange = selection.getRangeAt(0).cloneRange();
+    return true;
+  } catch (_error) {
+    return false;
+  }
+}
+
+function restoreSelection(target) {
+  if (!lastKnownSelectionRange) {
+    return null;
+  }
+
+  const ownerDocument =
+    lastKnownSelectionRange.startContainer?.ownerDocument || target?.ownerDocument || document;
+  const ownerWindow = ownerDocument.defaultView || window;
+  const selection = ownerWindow.getSelection ? ownerWindow.getSelection() : null;
+  if (!selection) {
+    return null;
+  }
+
+  try {
+    selection.removeAllRanges();
+    selection.addRange(lastKnownSelectionRange.cloneRange());
+    return selection;
+  } catch (_error) {
+    return null;
+  }
 }
 
 function getIframeBody() {
@@ -161,6 +298,7 @@ function bindIframeListeners() {
   const markReady = () => {
     const target = iframeDocument.activeElement || iframeDocument.body;
     rememberFocusedTarget(target);
+    void flushPendingInsertion();
   };
 
   iframeDocument.addEventListener("focusin", markReady, true);
@@ -187,8 +325,219 @@ function dispatchSyntheticInput(target, text = "") {
   target?.dispatchEvent(new Event("input", { bubbles: true }));
 }
 
+function dispatchEditorTextInsertion(target, text) {
+  const ownerDocument = target?.ownerDocument || document;
+  const ownerWindow = ownerDocument.defaultView || window;
+  const eventTarget = target instanceof HTMLElement ? target : ownerDocument.body;
+
+  try {
+    eventTarget.dispatchEvent(
+      new ownerWindow.InputEvent("beforeinput", {
+        bubbles: true,
+        cancelable: true,
+        data: text,
+        inputType: "insertText",
+      })
+    );
+  } catch (_error) {
+    // Ignore unsupported constructor environments.
+  }
+
+  try {
+    const textInputEvent = ownerDocument.createEvent("TextEvent");
+    textInputEvent.initTextEvent("textInput", true, true, ownerWindow, text);
+    eventTarget.dispatchEvent(textInputEvent);
+  } catch (_error) {
+    // Ignore unsupported TextEvent environments.
+  }
+
+  try {
+    eventTarget.dispatchEvent(
+      new ownerWindow.InputEvent("input", {
+        bubbles: true,
+        data: text,
+        inputType: "insertText",
+      })
+    );
+  } catch (_error) {
+    eventTarget.dispatchEvent(new Event("input", { bubbles: true }));
+  }
+}
+
+function dispatchEditorPaste(target, text) {
+  const ownerDocument = target?.ownerDocument || document;
+  const ownerWindow = ownerDocument.defaultView || window;
+  const eventTarget = target instanceof HTMLElement ? target : ownerDocument.body;
+
+  try {
+    const dataTransfer = new DataTransfer();
+    dataTransfer.setData("text/plain", text);
+    const pasteEvent = new ownerWindow.ClipboardEvent("paste", {
+      bubbles: true,
+      cancelable: true,
+      clipboardData: dataTransfer,
+    });
+    eventTarget.dispatchEvent(pasteEvent);
+    return true;
+  } catch (_error) {
+    return false;
+  }
+}
+
+function dispatchEditorTyping(target, text) {
+  const ownerDocument = target?.ownerDocument || document;
+  const ownerWindow = ownerDocument.defaultView || window;
+  const eventTarget = target instanceof HTMLElement ? target : ownerDocument.body;
+
+  for (const char of text) {
+    const key =
+      char === "\n" ? "Enter" : char === " " ? " " : char;
+    const code =
+      char === "\n"
+        ? "Enter"
+        : /^[a-z]$/i.test(char)
+        ? `Key${char.toUpperCase()}`
+        : "Unidentified";
+
+    try {
+      eventTarget.dispatchEvent(
+        new ownerWindow.KeyboardEvent("keydown", {
+          bubbles: true,
+          cancelable: true,
+          key,
+          code,
+        })
+      );
+    } catch (_error) {
+      // No-op.
+    }
+
+    dispatchEditorTextInsertion(eventTarget, char);
+
+    try {
+      eventTarget.dispatchEvent(
+        new ownerWindow.KeyboardEvent("keyup", {
+          bubbles: true,
+          cancelable: true,
+          key,
+          code,
+        })
+      );
+    } catch (_error) {
+      // No-op.
+    }
+  }
+}
+
+async function copyTextToClipboard(text) {
+  const normalized = String(text || "");
+  if (!normalized.trim()) {
+    return false;
+  }
+
+  try {
+    await navigator.clipboard.writeText(normalized);
+    return true;
+  } catch (_error) {
+    return false;
+  }
+}
+
+function removeTranscriptOverlay() {
+  if (transcriptOverlay?.isConnected) {
+    transcriptOverlay.remove();
+  }
+  transcriptOverlay = null;
+}
+
+function ensureTranscriptOverlay() {
+  if (transcriptOverlay?.isConnected) {
+    return transcriptOverlay;
+  }
+
+  const overlay = document.createElement("div");
+  overlay.style.position = "fixed";
+  overlay.style.right = "16px";
+  overlay.style.bottom = "16px";
+  overlay.style.zIndex = "2147483647";
+  overlay.style.width = "320px";
+  overlay.style.maxWidth = "calc(100vw - 32px)";
+  overlay.style.padding = "14px";
+  overlay.style.borderRadius = "16px";
+  overlay.style.background = "#fffdf8";
+  overlay.style.border = "1px solid rgba(24, 20, 13, 0.12)";
+  overlay.style.boxShadow = "0 18px 40px rgba(24, 20, 13, 0.18)";
+  overlay.style.fontFamily = "Arial, sans-serif";
+  overlay.style.color = "#1f1b16";
+
+  const title = document.createElement("div");
+  title.textContent = "Dictation text is ready";
+  title.style.fontSize = "14px";
+  title.style.fontWeight = "700";
+  title.style.marginBottom = "8px";
+
+  const body = document.createElement("div");
+  body.style.fontSize = "13px";
+  body.style.lineHeight = "1.45";
+  body.style.whiteSpace = "pre-wrap";
+  body.style.maxHeight = "180px";
+  body.style.overflowY = "auto";
+  body.style.marginBottom = "10px";
+  body.dataset.role = "transcript-body";
+
+  const actions = document.createElement("div");
+  actions.style.display = "flex";
+  actions.style.gap = "8px";
+
+  const copyBtn = document.createElement("button");
+  copyBtn.type = "button";
+  copyBtn.textContent = "Copy text";
+  copyBtn.style.flex = "1";
+  copyBtn.style.border = "0";
+  copyBtn.style.borderRadius = "10px";
+  copyBtn.style.background = "#1f1b16";
+  copyBtn.style.color = "#fff";
+  copyBtn.style.padding = "10px 12px";
+  copyBtn.style.cursor = "pointer";
+  copyBtn.addEventListener("click", async () => {
+    const text = body.textContent || "";
+    const copied = await copyTextToClipboard(text);
+    copyBtn.textContent = copied ? "Copied" : "Copy failed";
+  });
+
+  const closeBtn = document.createElement("button");
+  closeBtn.type = "button";
+  closeBtn.textContent = "Close";
+  closeBtn.style.border = "1px solid rgba(24, 20, 13, 0.12)";
+  closeBtn.style.borderRadius = "10px";
+  closeBtn.style.background = "#fff";
+  closeBtn.style.color = "#1f1b16";
+  closeBtn.style.padding = "10px 12px";
+  closeBtn.style.cursor = "pointer";
+  closeBtn.addEventListener("click", () => {
+    removeTranscriptOverlay();
+  });
+
+  actions.append(copyBtn, closeBtn);
+  overlay.append(title, body, actions);
+  document.documentElement.appendChild(overlay);
+  transcriptOverlay = overlay;
+  return overlay;
+}
+
+function showTranscriptOverlay(text) {
+  const overlay = ensureTranscriptOverlay();
+  const body = overlay.querySelector('[data-role="transcript-body"]');
+  if (body) {
+    body.textContent = text;
+  }
+}
+
 function markSessionStart() {
   sessionStartedAtMs = Date.now();
+  usageCommittedForSession = false;
+  unloadCommitStarted = false;
+  recorderStopPromise = null;
   clearSessionSecondsTimer();
   sessionSecondsTimer = setInterval(() => {
     if (!sessionStartedAtMs) {
@@ -200,20 +549,28 @@ function markSessionStart() {
 }
 
 async function commitUsage() {
-  if (!sessionStartedAtMs) {
+  if (!sessionStartedAtMs || usageCommittedForSession) {
     return null;
   }
 
   const elapsedSeconds = Math.max(0, Math.ceil((Date.now() - sessionStartedAtMs) / 1000));
-  sessionStartedAtMs = 0;
-  state.sessionSeconds = 0;
-  clearSessionSecondsTimer();
-
   if (!elapsedSeconds) {
+    sessionStartedAtMs = 0;
+    state.sessionSeconds = 0;
+    clearSessionSecondsTimer();
     return null;
   }
 
-  return sendRuntimeMessage({ type: "addDictationUsage", seconds: elapsedSeconds });
+  try {
+    const result = await sendRuntimeMessage({ type: "addDictationUsage", seconds: elapsedSeconds });
+    usageCommittedForSession = true;
+    sessionStartedAtMs = 0;
+    state.sessionSeconds = 0;
+    clearSessionSecondsTimer();
+    return result;
+  } catch (error) {
+    throw error;
+  }
 }
 
 function focusGoogleDocsSurface() {
@@ -233,7 +590,7 @@ function focusGoogleDocsSurface() {
   }
 
   const active = document.activeElement;
-  if (active instanceof HTMLElement) {
+  if (active instanceof HTMLElement && isValidInsertionTarget(active)) {
     active.focus();
   }
 
@@ -243,13 +600,14 @@ function focusGoogleDocsSurface() {
     return editable;
   }
 
-  return active instanceof HTMLElement ? active : null;
+  return active instanceof HTMLElement && isValidInsertionTarget(active) ? active : null;
 }
 
 function ensureCollapsedSelection(target) {
   const ownerDocument = target.ownerDocument || document;
   const ownerWindow = ownerDocument.defaultView || window;
-  const selection = ownerWindow.getSelection ? ownerWindow.getSelection() : null;
+  const selection =
+    restoreSelection(target) || (ownerWindow.getSelection ? ownerWindow.getSelection() : null);
   if (!selection) {
     return null;
   }
@@ -267,6 +625,7 @@ function ensureCollapsedSelection(target) {
   }
   selection.removeAllRanges();
   selection.addRange(range);
+  captureSelection(target);
   return selection;
 }
 
@@ -303,14 +662,35 @@ async function transcribeAudioChunk(blob) {
     return "";
   }
 
-  const audioBase64 = await blobToBase64(blob);
-  const response = await sendRuntimeMessage({
-    type: "transcribeAudio",
-    audioBase64,
-    mimeType: blob.type || "audio/webm",
-  });
+  const deviceToken = await getOrCreateDeviceToken();
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 50000);
 
-  return typeof response.text === "string" ? response.text.trim() : "";
+  try {
+    const response = await fetch(`${REMOTE_API_BASE_URL}/transcribe-raw`, {
+      method: "POST",
+      headers: {
+        "x-device-token": deviceToken,
+        "x-audio-mime": blob.type || "audio/webm",
+      },
+      body: blob,
+      signal: controller.signal,
+    });
+
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      throw new Error(payload?.error || `Transcription failed with ${response.status}`);
+    }
+
+    return typeof payload.text === "string" ? payload.text.trim() : "";
+  } catch (error) {
+    if (error?.name === "AbortError") {
+      throw new Error("Transcription timed out. Please try a shorter recording.");
+    }
+    throw error;
+  } finally {
+    clearTimeout(timeoutId);
+  }
 }
 
 function isVoiceCommand(text, pattern) {
@@ -373,17 +753,14 @@ function undoLastInsertion() {
 }
 
 function insertTextWithSelection(target, text) {
-  if (!target || !text) {
+  if (!target || !text || !isValidInsertionTarget(target)) {
     return false;
   }
 
   const ownerDocument = target.ownerDocument || document;
   const ownerWindow = ownerDocument.defaultView || window;
 
-  if (
-    target instanceof HTMLTextAreaElement ||
-    (target instanceof HTMLInputElement && /^(text|search|url|email|tel)$/i.test(target.type))
-  ) {
+  if (isTextInputTarget(target)) {
     const start = target.selectionStart ?? target.value.length;
     const end = target.selectionEnd ?? target.value.length;
     target.focus();
@@ -393,6 +770,32 @@ function insertTextWithSelection(target, text) {
   }
 
   target.focus();
+
+  if (ownerDocument !== document) {
+    const selection =
+      ensureCollapsedSelection(target) || (ownerWindow.getSelection ? ownerWindow.getSelection() : null);
+    if (!selection) {
+      return false;
+    }
+
+    try {
+      if (typeof ownerDocument.execCommand === "function") {
+        ownerDocument.execCommand("insertText", false, text);
+      }
+    } catch (_error) {
+      // Ignore and continue with synthetic editor events.
+    }
+
+    if (dispatchEditorPaste(target, text)) {
+      captureSelection(target);
+      return false;
+    }
+
+    dispatchEditorTextInsertion(target, text);
+    dispatchEditorTyping(target, text);
+    captureSelection(target);
+    return false;
+  }
 
   if (typeof ownerDocument.execCommand === "function") {
     try {
@@ -418,6 +821,7 @@ function insertTextWithSelection(target, text) {
   range.collapse(true);
   selection.removeAllRanges();
   selection.addRange(range);
+  captureSelection(node);
   dispatchSyntheticInput(target, text);
   return true;
 }
@@ -434,12 +838,6 @@ function insertTextIntoDocument(text) {
 
   const appendTrailingSpace = !/[\n,.;:!?"]$/.test(normalizedTranscript);
   const normalized = appendTrailingSpace ? `${normalizedTranscript} ` : normalizedTranscript;
-  const activeElement = document.activeElement;
-
-  if (activeElement && insertTextWithSelection(activeElement, normalized)) {
-    rememberFocusedTarget(activeElement);
-    return true;
-  }
 
   const docsSurface = focusGoogleDocsSurface();
   if (docsSurface && insertTextWithSelection(docsSurface, normalized)) {
@@ -447,13 +845,48 @@ function insertTextIntoDocument(text) {
     return true;
   }
 
+  const activeElement = document.activeElement;
+  if (activeElement && insertTextWithSelection(activeElement, normalized)) {
+    rememberFocusedTarget(activeElement);
+    return true;
+  }
+
   state.cursorReady = false;
   return false;
+}
+
+async function flushPendingInsertion() {
+  const pending = getPendingInsertionText();
+  if (!pending) {
+    return false;
+  }
+
+  const inserted = insertTextIntoDocument(pending);
+  if (!inserted) {
+    showTranscriptOverlay(pending);
+    setStatus("idle", "Google Docs blocked direct insertion. The exact transcript is shown on the page.");
+    sendStateUpdate();
+    return false;
+  }
+
+  clearPendingInsertion();
+  state.transcript = `${state.transcript} ${pending}`.trim();
+  state.insertedChars += pending.length;
+  state.interimTranscript = "";
+  insertionHistory.push(pending);
+  setStatus(
+    desiredRunning && mediaRecorder ? "listening" : "idle",
+    desiredRunning && mediaRecorder
+      ? "Listening and transcribing with OpenAI..."
+      : "Pending text inserted."
+  );
+  return true;
 }
 
 async function handleTranscriptionText(text) {
   const normalizedTranscript = normalizeTranscriptChunk(text);
   if (!normalizedTranscript) {
+    setStatus("idle", "No speech detected. Try again.");
     return;
   }
 
@@ -468,13 +901,11 @@ async function handleTranscriptionText(text) {
 
   const inserted = insertTextIntoDocument(normalizedTranscript);
   if (!inserted) {
-    desiredRunning = false;
-    if (mediaRecorder && mediaRecorder.state !== "inactive") {
-      mediaRecorder.stop();
-    }
+    enqueuePendingInsertion(normalizedTranscript);
+    showTranscriptOverlay(normalizedTranscript);
     setStatus(
-      "error",
-      "Click inside the Google Docs editor first, then start dictation again."
+      desiredRunning && mediaRecorder ? "listening" : "idle",
+      "Google Docs blocked direct insertion. The exact transcript is shown on the page."
     );
     return;
   }
@@ -483,6 +914,7 @@ async function handleTranscriptionText(text) {
   state.insertedChars += normalizedTranscript.length;
   state.interimTranscript = "";
   insertionHistory.push(normalizedTranscript);
+  setStatus("idle", "Text inserted into Google Docs.");
   sendStateUpdate();
 }
 
@@ -505,13 +937,15 @@ function queueTranscription(blob) {
       }
     })
     .catch((error) => {
-      desiredRunning = false;
       lastErrorMessage = error.message || "OpenAI transcription failed.";
       state.interimTranscript = "";
-      setStatus("error", lastErrorMessage);
-      if (mediaRecorder && mediaRecorder.state !== "inactive") {
-        mediaRecorder.stop();
-      }
+      setStatus(
+        desiredRunning && mediaRecorder ? "listening" : "error",
+        desiredRunning && mediaRecorder
+          ? `Transcription issue: ${lastErrorMessage}`
+          : lastErrorMessage
+      );
+      sendStateUpdate();
     });
 
   return transcriptionQueue;
@@ -584,22 +1018,26 @@ async function startDictation() {
     return;
   }
 
-  mediaRecorder.ondataavailable = (event) => {
-    if (!event.data?.size) {
-      return;
-    }
-    void queueTranscription(event.data);
-  };
-
   mediaRecorder.onerror = (event) => {
     desiredRunning = false;
     lastErrorMessage = event?.error?.message || "Microphone recording failed.";
     setStatus("error", lastErrorMessage);
   };
 
-  mediaRecorder.onstop = () => {
+  mediaRecorder.onstop = async () => {
     releaseMicrophone();
+    const audioBlob = buildSessionAudioBlob();
+    resetSessionAudio();
     mediaRecorder = null;
+    if (!audioBlob?.size) {
+      recorderStopPromise = null;
+      return;
+    }
+
+    state.interimTranscript = "Transcribing...";
+    sendStateUpdate();
+    await queueTranscription(audioBlob).catch(() => null);
+    recorderStopPromise = null;
   };
 
   markSessionStart();
@@ -607,21 +1045,56 @@ async function startDictation() {
     desiredRunning = false;
     try {
       if (mediaRecorder && mediaRecorder.state !== "inactive") {
-        mediaRecorder.requestData();
+        recorderStopPromise =
+          recorderStopPromise ||
+          new Promise((resolve) => {
+            const previousOnStop = mediaRecorder.onstop;
+            mediaRecorder.onstop = async (...args) => {
+              try {
+                if (typeof previousOnStop === "function") {
+                  await previousOnStop.apply(mediaRecorder, args);
+                }
+              } finally {
+                resolve();
+              }
+            };
+          });
         mediaRecorder.stop();
       }
     } catch (_error) {
       // No-op.
     }
-    await transcriptionQueue.catch(() => null);
+    if (recorderStopPromise) {
+      await withTimeout(
+        recorderStopPromise.catch(() => null),
+        10000,
+        "Stopping the microphone took too long. Please try again."
+      ).catch((error) => {
+        setStatus("error", error.message || "Unable to stop dictation.");
+      });
+    }
+    await withTimeout(
+      transcriptionQueue.catch(() => null),
+      60000,
+      "Transcription took too long. Please try a shorter recording."
+    ).catch((error) => {
+      setStatus("error", error.message || "Unable to finish transcription.");
+    });
     await commitUsage().catch(() => null);
     setStatus("error", "Dictation limit reached. Upgrade to continue.");
   }, Number(quota.remainingSeconds) * 1000);
 
   setStatus("starting", "Starting AI dictation...");
   try {
-    mediaRecorder.start(RECORDER_TIMESLICE_MS);
-    setStatus("listening", "Listening and transcribing with OpenAI...");
+    mediaRecorder.start();
+    resetSessionAudio();
+    mediaRecorder.ondataavailable = (event) => {
+      if (!event.data?.size) {
+        return;
+      }
+      sessionAudioChunks.push(event.data);
+    };
+    setStatus("listening", "Recording your voice. Press Stop to transcribe and insert text.");
   } catch (error) {
     desiredRunning = false;
     clearQuotaTimer();
@@ -636,24 +1109,51 @@ async function startDictation() {
 async function stopDictation() {
   desiredRunning = false;
   clearQuotaTimer();
+  state.interimTranscript = "";
+  setStatus("starting", "Transcribing and inserting text...");
   if (mediaRecorder && mediaRecorder.state !== "inactive") {
+    recorderStopPromise =
+      recorderStopPromise ||
+      new Promise((resolve) => {
+        const previousOnStop = mediaRecorder.onstop;
+        mediaRecorder.onstop = async (...args) => {
+          try {
+            if (typeof previousOnStop === "function") {
+              await previousOnStop.apply(mediaRecorder, args);
+            }
+          } finally {
+            resolve();
+          }
+        };
+      });
     try {
-      mediaRecorder.requestData();
       mediaRecorder.stop();
     } catch (_error) {
       // No-op.
     }
   }
 
-  await transcriptionQueue.catch(() => null);
+  if (recorderStopPromise) {
+    await withTimeout(
+      recorderStopPromise.catch(() => null),
+      10000,
+      "Stopping the microphone took too long. Please try again."
+    ).catch((error) => {
+      setStatus("error", error.message || "Unable to stop dictation.");
+    });
+  }
+  await withTimeout(
+    transcriptionQueue.catch(() => null),
+    60000,
+    "Transcription took too long. Please try a shorter recording."
+  ).catch((error) => {
+    setStatus("error", error.message || "Unable to finish transcription.");
+  });
   try {
     await commitUsage();
   } catch (_error) {
     // Keep the UX stable if the usage endpoint is unavailable.
   }
-
-  state.interimTranscript = "";
-  setStatus("idle", "Dictation stopped.");
 }
 
 async function flushUsageOnUnload() {
@@ -666,14 +1166,24 @@ async function flushUsageOnUnload() {
   clearQuotaTimer();
   if (mediaRecorder && mediaRecorder.state !== "inactive") {
     try {
-      mediaRecorder.requestData();
       mediaRecorder.stop();
     } catch (_error) {
       // No-op.
     }
   }
 
-  await transcriptionQueue.catch(() => null);
+  if (recorderStopPromise) {
+    await withTimeout(
+      recorderStopPromise.catch(() => null),
+      10000,
+      "Stopping the microphone took too long. Please try again."
+    ).catch(() => null);
+  }
+  await withTimeout(
+    transcriptionQueue.catch(() => null),
+    60000,
+    "Transcription took too long. Please try a shorter recording."
+  ).catch(() => null);
   try {
     await commitUsage();
   } catch (_error) {
@@ -699,9 +1209,11 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   }
 
   if (message.type === "stopDictation") {
-    stopDictation()
-      .then(() => sendResponse({ ok: true, state }))
-      .catch((error) => sendResponse({ ok: false, error: error.message || "Unable to stop dictation." }));
+    sendResponse({ ok: true, state });
+    stopDictation().catch((error) => {
+      lastErrorMessage = error.message || "Unable to stop dictation.";
+      setStatus("error", lastErrorMessage);
+    });
     return true;
   }
 
@@ -712,6 +1224,7 @@ document.addEventListener(
   "focusin",
   (event) => {
     rememberFocusedTarget(event.target);
+    void flushPendingInsertion();
   },
   true
 );
@@ -721,6 +1234,7 @@ document.addEventListener(
   (event) => {
     rememberFocusedTarget(event.target);
     bindIframeListeners();
+    void flushPendingInsertion();
   },
   true
 );

@@ -20,7 +20,7 @@
       "32": "icons/icon32.png"
     }
   },
-  "permissions": ["storage"],
+  "permissions": ["storage", "scripting"],
   "optional_permissions": ["activeTab"],
   "host_permissions": [
     "https://docs.google.com/*",
