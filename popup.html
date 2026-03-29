@@ -10,50 +10,47 @@
     <main class="container">
       <section class="hero">
         <div class="hero-copy">
-          <p class="eyebrow">Google Docs Dictation</p>
-          <h1 class="title">Speech to Text for Google Docs</h1>
+          <p class="eyebrow">Voice input for Docs</p>
+          <h1 class="title">Speech to Text for Google docs</h1>
         </div>
         <button id="upgrade" class="chip-btn">Get plan</button>
       </section>
 
       <section class="status-panel">
-        <div class="status-head">
-          <p id="status" class="status">Ready</p>
-          <span class="live-dot" aria-hidden="true"></span>
+        <div class="status-copy">
+          <div class="status-line">
+            <p id="status" class="status">Ready</p>
+            <span class="live-dot" aria-hidden="true"></span>
+          </div>
+          <p id="hint" class="hint">
+            Record up to 2 minutes, review the transcript, then paste it into Google Docs with Cmd+V.
+          </p>
         </div>
-        <p id="hint" class="hint">
-          Record up to 60 seconds, review the transcript, then paste it into Google Docs with Cmd+V.
-        </p>
-      </section>
-
-      <section class="doc-panel">
-        <div class="doc-copy">
-          <p class="doc-label">Current document</p>
-          <p id="docTitle" class="doc-title">No active Google Docs tab</p>
-        </div>
-        <p id="quota" class="quota">10 free minutes included</p>
       </section>
 
       <section class="controls-panel">
-        <div class="flow-note">
-          <span>1. Record</span>
-          <span>2. Review</span>
-          <span>3. Paste into Docs</span>
+        <div id="countdown" class="countdown hidden" aria-label="Recording time remaining">
+          <div id="countdownFill" class="countdown-fill"></div>
         </div>
-        <div id="countdown" class="countdown hidden">60s left</div>
         <button id="start" class="primary">Start recording</button>
-        <div class="controls-row">
-          <button id="stop" class="secondary" disabled>Stop and transcribe</button>
-        </div>
-        <button id="openDocs" class="secondary docs-btn">Open Google Docs</button>
+        <button id="stop" class="primary hidden" disabled>Stop and transcribe</button>
       </section>
 
-      <section class="account-panel">
-        <div class="account-copy">
-          <p class="account-label">Account</p>
-          <p id="accountState" class="account-state">Not signed in</p>
+      <section class="meta-panel">
+        <div class="meta-row">
+          <div class="doc-copy">
+            <p class="doc-label">Current document</p>
+            <p id="docTitle" class="doc-title">No active Google Docs tab</p>
+          </div>
+          <p id="quota" class="quota">10 free minutes included</p>
         </div>
-        <button id="accountAction" class="account-btn">Sign in</button>
+        <div class="meta-row meta-row-account">
+          <div class="account-copy">
+            <p class="account-label">Account</p>
+            <p id="accountState" class="account-state">Not signed in</p>
+          </div>
+          <button id="accountAction" class="account-btn">Sign in</button>
+        </div>
       </section>
 
       <div class="footer-links">
@@ -66,7 +63,7 @@
       <div class="paywall-sheet">
         <div class="paywall-top">
           <div>
-            <p class="paywall-kicker">Dictation plans</p>
+            <p class="paywall-kicker">Speech to Text for Google docs</p>
             <h2 class="paywall-title">Choose your plan</h2>
           </div>
           <button id="closePaywall" class="paywall-close" aria-label="Close paywall">×</button>
@@ -87,8 +84,8 @@
         </section>
         <div id="paywallPlans" class="paywall-plans">
           <button class="plan-card selected" data-plan-id="monthly">
-            <span class="plan-eyebrow">1-MONTH PLAN</span>
             <span class="plan-main">
+              <span class="plan-eyebrow">1-MONTH PLAN</span>
               <span class="plan-total">$9.99 per month</span>
             </span>
             <span class="plan-side">
@@ -98,8 +95,8 @@
           </button>
           <button class="plan-card featured" data-plan-id="annual">
             <span class="plan-badge accent-badge">MOST POPULAR</span>
-            <span class="plan-eyebrow">12-MONTH PLAN</span>
             <span class="plan-main">
+              <span class="plan-eyebrow">12-MONTH PLAN</span>
               <span class="plan-total">$89.99 per year</span>
             </span>
             <span class="plan-side">

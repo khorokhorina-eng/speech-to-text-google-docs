@@ -21,7 +21,6 @@
 body {
   margin: 0;
   width: 400px;
-  min-height: 520px;
   font-family: Georgia, "Times New Roman", serif;
   color: var(--ink);
   background:
@@ -39,7 +38,7 @@ body {
   display: flex;
   justify-content: space-between;
   gap: 10px;
-  align-items: flex-start;
+  align-items: center;
 }
 
 .eyebrow,
@@ -59,21 +58,19 @@ body {
 }
 
 .eyebrow {
-  margin-bottom: 6px;
-  color: var(--accent);
+  margin-bottom: 4px;
+  color: #9b6b40;
 }
 
 .title {
   margin: 0;
-  font-size: 27px;
+  font-size: 25px;
   line-height: 0.98;
-  letter-spacing: -0.04em;
+  letter-spacing: -0.05em;
 }
 
 .status-panel,
-.doc-panel,
 .controls-panel,
-.account-panel,
 .paywall-sheet {
   border: 1px solid var(--line);
   border-radius: 24px;
@@ -81,26 +78,48 @@ body {
   box-shadow: var(--shadow);
 }
 
-.status-panel,
-.doc-panel,
-.account-panel {
-  padding: 12px 14px;
+.status-panel {
+  padding: 10px 12px;
 }
 
-.status-head,
-.doc-panel,
-.account-panel,
 .paywall-top {
   display: flex;
-  justify-content: space-between;
   gap: 10px;
   align-items: flex-start;
+}
+
+.status-copy {
+  min-width: 0;
+}
+
+.status-line {
+  display: inline-flex;
+  align-items: center;
+  gap: 11px;
+}
+
+.meta-panel {
+  display: grid;
+  gap: 0;
+  padding: 0 2px;
+}
+
+.meta-row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 11px 2px;
+}
+
+.meta-row + .meta-row {
+  border-top: 1px solid rgba(67, 47, 26, 0.1);
 }
 
 .status {
   margin: 0;
   font-family: "Helvetica Neue", Arial, sans-serif;
-  font-size: 18px;
+  font-size: 16px;
   font-weight: 600;
   color: #2d2924;
 }
@@ -119,6 +138,10 @@ body {
   color: var(--muted);
 }
 
+.hint {
+  margin-top: 3px;
+}
+
 .doc-title,
 .account-state,
 .auth-message,
@@ -128,13 +151,16 @@ body {
 }
 
 .quota {
-  max-width: 118px;
+  max-width: 116px;
   text-align: right;
+  margin-top: 0;
 }
 
 .live-dot {
   width: 9px;
   height: 9px;
+  flex: 0 0 auto;
+  margin-left: 1px;
   border-radius: 999px;
   background: var(--accent);
   box-shadow: 0 0 0 7px rgba(29, 92, 255, 0.1);
@@ -153,37 +179,24 @@ body[data-status="error"] .live-dot {
 .controls-panel {
   padding: 10px;
   display: grid;
-  gap: 8px;
-}
-
-.flow-note {
-  display: flex;
-  justify-content: space-between;
-  gap: 8px;
-  padding: 2px 4px 6px;
-  font-family: "Helvetica Neue", Arial, sans-serif;
-  font-size: 11px;
-  font-weight: 700;
-  color: var(--muted);
+  gap: 7px;
 }
 
 .countdown {
-  justify-self: start;
-  padding: 6px 10px;
+  width: 100%;
+  height: 10px;
+  overflow: hidden;
   border-radius: 999px;
-  background: #fff1ee;
-  border: 1px solid rgba(176, 59, 40, 0.18);
-  font-family: "Helvetica Neue", Arial, sans-serif;
-  font-size: 12px;
-  font-weight: 700;
-  color: var(--danger);
+  background: rgba(29, 92, 255, 0.12);
+  border: 1px solid rgba(29, 92, 255, 0.14);
 }
 
-.controls-row {
-  display: grid;
-  grid-template-columns: 1fr auto;
-  gap: 8px;
-  align-items: stretch;
+.countdown-fill {
+  width: 0%;
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, #1d5cff 0%, #4f8aff 100%);
+  transition: width 0.2s ease;
 }
 
 .language {
@@ -243,13 +256,18 @@ button:disabled {
 }
 
 .chip-btn {
-  min-height: 40px;
+  min-height: 36px;
   border-radius: 999px;
   color: var(--accent-deep);
 }
 
-.docs-btn {
-  width: 100%;
+.account-btn {
+  padding: 10px 0;
+  min-width: 58px;
+  background: transparent;
+  border: 0;
+  color: #6f655a;
+  box-shadow: none;
 }
 
 .footer-links {
@@ -283,28 +301,47 @@ button:disabled {
   width: 100%;
   max-height: calc(100vh - 28px);
   overflow-y: auto;
-  padding: 16px;
+  padding: 18px 16px 16px;
   display: grid;
-  gap: 14px;
+  gap: 13px;
   background: linear-gradient(180deg, rgba(255, 252, 247, 0.98), rgba(250, 244, 236, 0.96));
 }
 
 .paywall-close {
-  width: 34px;
-  height: 34px;
+  width: 44px;
+  height: 44px;
   padding: 0;
   border-radius: 999px;
-  background: #241f1a;
-  color: #fff;
+  background: rgba(255, 255, 255, 0.7);
+  color: #6b6258;
+  border-color: rgba(67, 47, 26, 0.12);
+  box-shadow: none;
+}
+
+.paywall-kicker {
+  color: #9b6b40;
+}
+
+.paywall-title {
+  margin: 4px 0 0;
+  font-size: 34px;
+  line-height: 0.96;
+  letter-spacing: -0.06em;
+}
+
+.paywall-status {
+  margin-top: -2px;
+  font-size: 13px;
+  line-height: 1.35;
 }
 
 .auth-panel {
   border: 1px solid var(--line);
-  border-radius: 18px;
-  padding: 12px;
+  border-radius: 20px;
+  padding: 12px 14px;
   background: rgba(255, 255, 255, 0.72);
   display: grid;
-  gap: 10px;
+  gap: 8px;
 }
 
 .auth-signed-in {
@@ -316,7 +353,7 @@ button:disabled {
 
 .paywall-plans {
   display: grid;
-  gap: 8px;
+  gap: 10px;
 }
 
 .plan-card {
@@ -325,11 +362,10 @@ button:disabled {
   text-align: left;
   display: flex;
   justify-content: space-between;
-  gap: 8px;
-  align-items: flex-end;
-  min-height: 146px;
-  padding: 18px 16px 14px;
-  border-radius: 28px;
+  gap: 12px;
+  align-items: flex-start;
+  padding: 14px;
+  border-radius: 22px;
 }
 
 .plan-card.selected,
@@ -340,18 +376,25 @@ button:disabled {
 
 .plan-card.featured {
   background:
-    radial-gradient(circle at top center, rgba(224, 132, 64, 0.12), transparent 48%),
-    var(--panel-strong);
+    radial-gradient(circle at top center, rgba(232, 153, 83, 0.18), transparent 50%),
+    linear-gradient(180deg, rgba(255, 252, 247, 0.98), rgba(255, 246, 233, 0.98));
+  border-color: rgba(24, 20, 13, 0.48);
+  min-height: 136px;
 }
 
 .plan-main,
 .plan-side {
   display: grid;
-  gap: 3px;
+  gap: 2px;
 }
 
 .plan-main {
-  align-content: end;
+  align-content: start;
+  gap: 4px;
+}
+
+.plan-card.featured .plan-main {
+  padding-top: 38px;
 }
 
 .plan-eyebrow,
@@ -363,23 +406,31 @@ button:disabled {
 }
 
 .plan-eyebrow {
-  position: absolute;
-  left: 16px;
-  top: 16px;
-  font-size: 12px;
+  font-size: 11px;
   font-weight: 900;
   letter-spacing: -0.02em;
   color: var(--ink);
 }
 
 .plan-total {
-  font-size: 15px;
+  font-size: 13px;
   font-weight: 700;
   color: #6f655a;
+  line-height: 1.05;
+}
+
+.plan-side {
+  align-content: start;
+  justify-items: end;
+  padding-top: 1px;
+}
+
+.plan-card.featured .plan-side {
+  padding-top: 38px;
 }
 
 .plan-day-price {
-  font-size: 48px;
+  font-size: 42px;
   line-height: 0.9;
   font-weight: 900;
   text-align: right;
@@ -387,7 +438,7 @@ button:disabled {
 }
 
 .plan-day-period {
-  font-size: 12px;
+  font-size: 11px;
   font-weight: 900;
   color: var(--muted);
   text-align: right;
@@ -397,16 +448,20 @@ button:disabled {
 .plan-badge {
   position: absolute;
   top: 12px;
-  left: 16px;
-  padding: 8px 12px;
+  left: 14px;
+  padding: 7px 12px;
   border-radius: 999px;
   background: #be5d23;
   color: #fff;
-  font-size: 11px;
+  font-size: 10px;
   font-weight: 900;
   letter-spacing: 0.01em;
 }
 
-.plan-card.featured .plan-eyebrow {
-  top: 52px;
+.continue-btn {
+  border-radius: 22px;
+  min-height: 56px;
+  font-size: 15px;
+  background: #1f1b18;
+  box-shadow: 0 14px 28px rgba(31, 27, 24, 0.22);
 }

@@ -8,7 +8,7 @@ const RECORDER_MIME_CANDIDATES = [
 ];
 const REMOTE_API_BASE_URL = "https://voicetext.world";
 const DEVICE_TOKEN_KEY = "deviceToken";
-const MAX_RECORDING_SECONDS = 60;
+const MAX_RECORDING_SECONDS = 120;
 
 const state = {
   connected: true,
@@ -831,13 +831,41 @@ function insertTextIntoDocument(text) {
   return false;
 }
 
+async function insertTextIntoGoogleDocs(text) {
+  if (!text) {
+    return false;
+  }
+
+  const normalizedTranscript = normalizeTranscriptChunk(text);
+  if (!normalizedTranscript) {
+    return false;
+  }
+
+  const appendTrailingSpace = !/[\n,.;:!?"]$/.test(normalizedTranscript);
+  const normalized = appendTrailingSpace ? `${normalizedTranscript} ` : normalizedTranscript;
+
+  try {
+    const response = await sendRuntimeMessage({
+      type: "nativeTypeText",
+      text: normalized,
+    });
+    if (response?.inserted) {
+      return true;
+    }
+  } catch (_error) {
+    // Fall back to content-script insertion below.
+  }
+
+  return insertTextIntoDocument(normalizedTranscript);
+}
+
 async function flushPendingInsertion() {
   const pending = getPendingInsertionText();
   if (!pending) {
     return false;
   }
 
-  const inserted = insertTextIntoDocument(pending);
+  const inserted = await insertTextIntoGoogleDocs(pending);
   if (!inserted) {
     showTranscriptOverlay(pending);
     setStatus("idle", "Transcript ready. Copy it from the page card and paste it into Google Docs.");
@@ -875,7 +903,7 @@ async function handleTranscriptionText(text) {
     return;
   }
 
-  const inserted = insertTextIntoDocument(normalizedTranscript);
+  const inserted = await insertTextIntoGoogleDocs(normalizedTranscript);
   if (!inserted) {
     enqueuePendingInsertion(normalizedTranscript);
     showTranscriptOverlay(normalizedTranscript);
@@ -1059,7 +1087,7 @@ async function startDictation() {
       setStatus("error", error.message || "Unable to finish transcription.");
     });
     await commitUsage().catch(() => null);
-    setStatus("error", "60-second recording limit reached. Transcribe and start a new recording.");
+    setStatus("error", "2-minute recording limit reached. Transcribe and start a new recording.");
   }, recordingSecondsLimit * 1000);
 
   setStatus("starting", "Starting AI dictation...");
@@ -1072,7 +1100,7 @@ async function startDictation() {
       }
       sessionAudioChunks.push(event.data);
     };
-    setStatus("listening", "Recording your voice. Each recording can be up to 60 seconds.");
+    setStatus("listening", "Recording your voice. Each recording can be up to 2 minutes.");
   } catch (error) {
     desiredRunning = false;
     clearQuotaTimer();

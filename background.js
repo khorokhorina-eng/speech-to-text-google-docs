@@ -482,6 +482,117 @@ function queryActiveTab() {
   });
 }
 
+function queryDocsTabs() {
+  return new Promise((resolve, reject) => {
+    chrome.tabs.query({ url: ["https://docs.google.com/document/*"] }, (tabs) => {
+      if (chrome.runtime.lastError) {
+        reject(new Error(chrome.runtime.lastError.message));
+        return;
+      }
+      resolve(tabs || []);
+    });
+  });
+}
+
+function activateTab(tabId, windowId) {
+  return new Promise((resolve, reject) => {
+    chrome.tabs.update(tabId, { active: true }, (tab) => {
+      if (chrome.runtime.lastError) {
+        reject(new Error(chrome.runtime.lastError.message));
+        return;
+      }
+
+      if (typeof windowId === "number") {
+        chrome.windows.update(windowId, { focused: true }, () => {
+          if (chrome.runtime.lastError) {
+            reject(new Error(chrome.runtime.lastError.message));
+            return;
+          }
+          resolve(tab);
+        });
+        return;
+      }
+
+      resolve(tab);
+    });
+  });
+}
+
+function attachDebugger(target) {
+  return new Promise((resolve, reject) => {
+    chrome.debugger.attach(target, "1.3", () => {
+      if (chrome.runtime.lastError) {
+        reject(new Error(chrome.runtime.lastError.message));
+        return;
+      }
+      resolve();
+    });
+  });
+}
+
+function detachDebugger(target) {
+  return new Promise((resolve, reject) => {
+    chrome.debugger.detach(target, () => {
+      if (chrome.runtime.lastError) {
+        reject(new Error(chrome.runtime.lastError.message));
+        return;
+      }
+      resolve();
+    });
+  });
+}
+
+function sendDebuggerCommand(target, method, params = {}) {
+  return new Promise((resolve, reject) => {
+    chrome.debugger.sendCommand(target, method, params, (result) => {
+      if (chrome.runtime.lastError) {
+        reject(new Error(chrome.runtime.lastError.message));
+        return;
+      }
+      resolve(result);
+    });
+  });
+}
+
+async function nativeTypeTextInTab(tabId, windowId, text) {
+  const normalized = typeof text === "string" ? text : "";
+  if (!normalized.trim()) {
+    throw new Error("Nothing to insert.");
+  }
+
+  await activateTab(tabId, windowId).catch(() => null);
+  const target = { tabId };
+  await attachDebugger(target);
+
+  try {
+    for (const char of normalized) {
+      if (char === "\n") {
+        await sendDebuggerCommand(target, "Input.dispatchKeyEvent", {
+          type: "rawKeyDown",
+          key: "Enter",
+          code: "Enter",
+          windowsVirtualKeyCode: 13,
+          nativeVirtualKeyCode: 13,
+        });
+        await sendDebuggerCommand(target, "Input.dispatchKeyEvent", {
+          type: "keyUp",
+          key: "Enter",
+          code: "Enter",
+          windowsVirtualKeyCode: 13,
+          nativeVirtualKeyCode: 13,
+        });
+        continue;
+      }
+
+      await sendDebuggerCommand(target, "Input.insertText", { text: char });
+    }
+
+    return { inserted: true };
+  } finally {
+    await detachDebugger(target).catch(() => null);
+  }
+}
+
 async function getActiveDocsTab() {
   const tab = await queryActiveTab();
   if (!tab?.id) {
@@ -607,8 +718,18 @@ async function stopDictation() {
 }
 
 async function openGoogleDocs() {
-  await chrome.tabs.create({ url: "https://docs.google.com/document/u/0/" });
-  return { opened: true };
+  const docsTabs = await queryDocsTabs().catch(() => []);
+  const existingTab = docsTabs.find((tab) =>
+    typeof tab.url === "string" && tab.url.startsWith("https://docs.google.com/document/")
+  );
+
+  if (existingTab?.id) {
+    await activateTab(existingTab.id, existingTab.windowId);
+    return { opened: true, reused: true, tabId: existingTab.id };
+  }
+
+  const createdTab = await chrome.tabs.create({ url: "https://docs.google.com/document/create" });
+  return { opened: true, reused: false, tabId: createdTab?.id || null };
 }
 
 chrome.tabs.onRemoved.addListener((tabId) => {
@@ -713,6 +834,20 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     openGoogleDocs()
       .then((result) => sendResponse({ ok: true, ...result }))
       .catch((error) => sendResponse({ ok: false, error: error.message || "Failed to open Google Docs." }));
+    return true;
+  }
+
+  if (message.type === "nativeTypeText") {
+    if (!sender.tab?.id) {
+      sendResponse({ ok: false, error: "No Google Docs tab is attached to this request." });
+      return false;
+    }
+
+    nativeTypeTextInTab(sender.tab.id, sender.tab.windowId, message.text)
+      .then((result) => sendResponse({ ok: true, ...result }))
+      .catch((error) =>
+        sendResponse({ ok: false, error: error.message || "Failed to type text into Google Docs." })
+      );
     return true;
   }
 

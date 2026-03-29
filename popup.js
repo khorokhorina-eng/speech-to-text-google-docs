@@ -3,9 +3,9 @@ const hintEl = document.getElementById("hint");
 const docTitleEl = document.getElementById("docTitle");
 const quotaEl = document.getElementById("quota");
 const countdownEl = document.getElementById("countdown");
+const countdownFillEl = document.getElementById("countdownFill");
 const startBtn = document.getElementById("start");
 const stopBtn = document.getElementById("stop");
-const openDocsBtn = document.getElementById("openDocs");
 const upgradeBtn = document.getElementById("upgrade");
 const pricingLinkBtn = document.getElementById("pricingLink");
 const contactBtn = document.getElementById("contact");
@@ -67,7 +67,8 @@ const STATUS_LABELS = {
   unsupported: "Unsupported",
   error: "Needs attention",
 };
-const MAX_RECORDING_SECONDS = 60;
+const MAX_RECORDING_SECONDS = 120;
+let docsAutoOpenAttempted = false;
 
 function sendRuntimeMessage(message) {
   return new Promise((resolve, reject) => {
@@ -152,16 +153,19 @@ function updateDictationUI() {
   docTitleEl.textContent = dictation.docTitle || "No active Google Docs tab";
 
   const isRunning = dictation.status === "listening" || dictation.status === "starting";
+  const showStart = !isRunning;
   startBtn.disabled = !dictation.isDocsPage || !dictation.supported || isRunning;
   stopBtn.disabled = !isRunning;
-  openDocsBtn.hidden = dictation.isDocsPage;
+  startBtn.classList.toggle("hidden", !showStart);
+  stopBtn.classList.toggle("hidden", showStart);
 
   if (isRunning) {
     const elapsedSeconds = Math.max(0, Number(dictation.sessionSeconds) || 0);
-    const remainingSeconds = Math.max(0, MAX_RECORDING_SECONDS - elapsedSeconds);
-    countdownEl.textContent = `${remainingSeconds}s left`;
+    const progressRatio = MAX_RECORDING_SECONDS > 0 ? elapsedSeconds / MAX_RECORDING_SECONDS : 0;
+    countdownFillEl.style.width = `${Math.max(0, Math.min(1, progressRatio)) * 100}%`;
     countdownEl.classList.remove("hidden");
   } else {
+    countdownFillEl.style.width = "0%";
     countdownEl.classList.add("hidden");
   }
 
@@ -257,11 +261,18 @@ async function stopDictation() {
   await Promise.all([refreshDictationState(), loadSubscriptionStatus()]);
 }
 
-async function openGoogleDocs() {
+async function autoOpenGoogleDocsIfNeeded() {
+  if (docsAutoOpenAttempted || state.dictation.isDocsPage) {
+    return;
+  }
+
+  docsAutoOpenAttempted = true;
+  state.dictation.message = "Opening Google Docs...";
+  updateUI();
   try {
     await sendRuntimeMessage({ type: "openGoogleDocs" });
   } catch (_error) {
-    chrome.tabs.create({ url: "https://docs.google.com/document/u/0/" });
+    chrome.tabs.create({ url: "https://docs.google.com/document/create" });
   }
 }
 
@@ -357,10 +368,6 @@ stopBtn.addEventListener("click", () => {
   stopDictation();
 });
 
-openDocsBtn.addEventListener("click", () => {
-  openGoogleDocs();
-});
-
 upgradeBtn.addEventListener("click", () => {
   openPaywall();
 });
@@ -405,7 +412,9 @@ authSignOutBtn.addEventListener("click", () => {
 });
 
 updateUI();
-void Promise.all([loadAuthState(), loadSubscriptionStatus(), refreshDictationState()]);
+void Promise.all([loadAuthState(), loadSubscriptionStatus(), refreshDictationState()]).then(() => {
+  void autoOpenGoogleDocsIfNeeded();
+});
 setInterval(() => {
   refreshDictationState();
 }, 1500);
