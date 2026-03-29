@@ -772,35 +772,10 @@ function insertTextWithSelection(target, text) {
 
   target.focus();
 
-  if (ownerDocument !== document) {
-    const selection =
-      ensureCollapsedSelection(target) || (ownerWindow.getSelection ? ownerWindow.getSelection() : null);
-    if (!selection) {
-      return false;
-    }
-
-    try {
-      if (typeof ownerDocument.execCommand === "function") {
-        ownerDocument.execCommand("insertText", false, text);
-      }
-    } catch (_error) {
-      // Ignore and continue with synthetic editor events.
-    }
-
-    if (dispatchEditorPaste(target, text)) {
-      captureSelection(target);
-      return false;
-    }
-
-    dispatchEditorTextInsertion(target, text);
-    dispatchEditorTyping(target, text);
-    captureSelection(target);
-    return false;
-  }
-
   if (typeof ownerDocument.execCommand === "function") {
     try {
       if (ownerDocument.execCommand("insertText", false, text)) {
+        captureSelection(target);
         dispatchSyntheticInput(target, text);
         return true;
       }
@@ -840,15 +815,15 @@ function insertTextIntoDocument(text) {
   const appendTrailingSpace = !/[\n,.;:!?"]$/.test(normalizedTranscript);
   const normalized = appendTrailingSpace ? `${normalizedTranscript} ` : normalizedTranscript;
 
-  const docsSurface = focusGoogleDocsSurface();
-  if (docsSurface && insertTextWithSelection(docsSurface, normalized)) {
-    rememberFocusedTarget(docsSurface);
-    return true;
-  }
-
   const activeElement = document.activeElement;
   if (activeElement && insertTextWithSelection(activeElement, normalized)) {
     rememberFocusedTarget(activeElement);
+    return true;
+  }
+
+  const docsSurface = focusGoogleDocsSurface();
+  if (docsSurface && insertTextWithSelection(docsSurface, normalized)) {
+    rememberFocusedTarget(docsSurface);
     return true;
   }
 
@@ -915,7 +890,7 @@ async function handleTranscriptionText(text) {
   state.insertedChars += normalizedTranscript.length;
   state.interimTranscript = "";
   insertionHistory.push(normalizedTranscript);
-  setStatus("idle", "Transcript is ready.");
+  setStatus("idle", "Text inserted into Google Docs.");
   sendStateUpdate();
 }
 
