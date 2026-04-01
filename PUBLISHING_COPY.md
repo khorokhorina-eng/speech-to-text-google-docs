@@ -2,7 +2,7 @@
 
 ## Product Name
 
-Speech to Text for Google Docs
+Speech to Text Google Docs
 
 ## Short Description
 
@@ -10,7 +10,7 @@ Record speech, transcribe it with OpenAI, then copy and paste the text into Goog
 
 ## Detailed Description
 
-Speech to Text for Google Docs helps you turn spoken words into text while working with Google Docs.
+Speech to Text Google Docs helps you turn spoken words into text while working with Google Docs.
 
 Use it to:
 

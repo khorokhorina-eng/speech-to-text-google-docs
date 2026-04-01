@@ -1,11 +1,11 @@
-# Speech to Text for Google Docs
+# Speech to Text Google Docs
 
 Starter extension repo based on the `pattern` template.
 
 Current status:
 
 - separate product repository is initialized
-- brand scaffold is set to `Speech to Text for Google Docs`
+- brand scaffold is set to `Speech to Text Google Docs`
 - Google Docs dictation flow is implemented in the extension runtime
 - auth, paywall, quota, and Stripe structure are wired for this product
 

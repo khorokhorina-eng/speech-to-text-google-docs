@@ -1,10 +1,10 @@
-# Speech to Text for Google Docs Change Reference
+# Speech to Text Google Docs Change Reference
 
 This file is the working reference for the live product codebase.
 
 ## Current Status
 
-- Product name: `Speech to Text for Google Docs`
+- Product name: `Speech to Text Google Docs`
 - Project folder: [speech-to-text-google-docs](/Users/n.khorokhorina/speech-to-text-google-docs)
 - The extension runtime is Google Docs-specific.
 - Dictation uses microphone capture in the content script and OpenAI transcription through the backend.

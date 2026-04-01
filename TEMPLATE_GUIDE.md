@@ -1,7 +1,7 @@
 # FocusTrace Template Guide
 
 This repository came from the shared paid-extension pattern and now serves as
-the live codebase for `Speech to Text for Google Docs`.
+the live codebase for `Speech to Text Google Docs`.
 
 Use the separate `pattern` repository if you want a clean base for another product.
 
