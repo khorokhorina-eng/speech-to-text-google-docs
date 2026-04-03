@@ -393,6 +393,15 @@ function rememberAccountCustomer(state, accountId, customerId) {
   state.customerToAccount[customerId] = accountId;
 }
 
+function forgetAccountCustomer(state, accountId, customerId = "") {
+  if (accountId && state.accountToCustomer[accountId]) {
+    delete state.accountToCustomer[accountId];
+  }
+  if (customerId && state.customerToAccount[customerId]) {
+    delete state.customerToAccount[customerId];
+  }
+}
+
 function getIncludedMinutesForPlan(planId) {
   return (
     PLAN_DEFINITIONS.find((plan) => plan.id === planId)?.includedMinutes || 0
@@ -483,7 +492,15 @@ function refundPaidMinutes(state, account, subscription, minutes) {
 async function ensureStripeCustomer(state, account) {
   const existingCustomerId = state.accountToCustomer[account.id];
   if (existingCustomerId) {
-    return existingCustomerId;
+    try {
+      await stripe.customers.retrieve(existingCustomerId);
+      return existingCustomerId;
+    } catch (error) {
+      if (error?.code !== "resource_missing") {
+        throw error;
+      }
+      forgetAccountCustomer(state, account.id, existingCustomerId);
+    }
   }
 
   const customer = await stripe.customers.create({
@@ -532,11 +549,27 @@ async function lookupSubscriptionStatusForAccount(state, account) {
     };
   }
 
-  const subscriptions = await stripe.subscriptions.list({
-    customer: customerId,
-    status: "all",
-    limit: 20,
-  });
+  let subscriptions;
+  try {
+    subscriptions = await stripe.subscriptions.list({
+      customer: customerId,
+      status: "all",
+      limit: 20,
+    });
+  } catch (error) {
+    if (error?.code !== "resource_missing") {
+      throw error;
+    }
+    forgetAccountCustomer(state, account.id, customerId);
+    return {
+      active: false,
+      status: "none",
+      plan: null,
+      customerId: null,
+      email: account.email,
+      signedIn: true,
+    };
+  }
 
   const activeSub = subscriptions.data.find(
     (sub) => sub.status === "active" || sub.status === "trialing"
@@ -624,22 +657,27 @@ async function handleAuthMe(req, res, parsedUrl) {
     return;
   }
 
-  const state = readState();
-  const account = getAccountForDevice(state, deviceToken);
-  const subscription = await lookupSubscriptionStatusForAccount(state, account);
-  const usage = getOrCreateDeviceUsage(state, deviceToken);
-  const paidMinutesLeft = getPaidMinutesLeft(state, account, subscription);
+  try {
+    const state = readState();
+    const account = getAccountForDevice(state, deviceToken);
+    const subscription = await lookupSubscriptionStatusForAccount(state, account);
+    const usage = getOrCreateDeviceUsage(state, deviceToken);
+    const paidMinutesLeft = getPaidMinutesLeft(state, account, subscription);
 
-  sendJson(res, 200, {
-    signedIn: Boolean(account),
-    email: account?.email || "",
-    method: account?.method || null,
-    signedInAt: account?.updatedAt || null,
-    paid: subscription.active,
-    subscriptionStatus: subscription.status || "none",
-    plan: subscription.plan?.planId || null,
-    minutesLeft: subscription.active ? paidMinutesLeft : usage.minutesLeft,
-  });
+    writeState(state);
+    sendJson(res, 200, {
+      signedIn: Boolean(account),
+      email: account?.email || "",
+      method: account?.method || null,
+      signedInAt: account?.updatedAt || null,
+      paid: subscription.active,
+      subscriptionStatus: subscription.status || "none",
+      plan: subscription.plan?.planId || null,
+      minutesLeft: subscription.active ? paidMinutesLeft : usage.minutesLeft,
+    });
+  } catch (error) {
+    sendJson(res, 500, { error: error.message || "Failed to read auth state." });
+  }
 }
 
 function renderAuthCompletePage(title, message, returnUrl = "") {
