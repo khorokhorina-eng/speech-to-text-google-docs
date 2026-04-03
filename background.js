@@ -295,6 +295,10 @@ function getDefaultLocalTrialState() {
   };
 }
 
+function roundMinutes(value) {
+  return Math.max(0, Math.round(Number(value || 0) * 100) / 100);
+}
+
 async function getLocalTrialState() {
   const result = await readStorage([LOCAL_TRIAL_STATE_KEY]);
   const raw = result?.[LOCAL_TRIAL_STATE_KEY];
@@ -305,16 +309,16 @@ async function getLocalTrialState() {
   }
 
   return {
-    minutesLeft: Math.max(0, Math.floor(Number(raw.minutesLeft))),
+    minutesLeft: roundMinutes(raw.minutesLeft),
     updatedAt: Number(raw.updatedAt) || Date.now(),
   };
 }
 
 async function consumeLocalTrialMinutes(seconds) {
   const current = await getLocalTrialState();
-  const usageMinutes = Math.max(1, Math.ceil(Math.max(0, Number(seconds) || 0) / 60));
+  const usageMinutes = roundMinutes(Math.max(0, Number(seconds) || 0) / 60);
   const next = {
-    minutesLeft: Math.max(0, current.minutesLeft - usageMinutes),
+    minutesLeft: roundMinutes(current.minutesLeft - usageMinutes),
     updatedAt: Date.now(),
   };
   await writeStorage({ [LOCAL_TRIAL_STATE_KEY]: next });
