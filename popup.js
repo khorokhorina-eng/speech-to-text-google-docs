@@ -360,6 +360,15 @@ function openExternalPage(pathname) {
   chrome.tabs.create({ url: `${base}${pathname}` });
 }
 
+async function showWelcomeOnFirstLaunch() {
+  const { welcomeShown } = await readStorage({ welcomeShown: false });
+  if (welcomeShown) {
+    return;
+  }
+  chrome.tabs.create({ url: "https://voicetext.world/welcome.html" });
+  await writeStorage({ welcomeShown: true });
+}
+
 startBtn.addEventListener("click", () => {
   startDictation();
 });
@@ -411,6 +420,7 @@ authSignOutBtn.addEventListener("click", () => {
   signOut();
 });
 
+void showWelcomeOnFirstLaunch();
 updateUI();
 void Promise.all([loadAuthState(), loadSubscriptionStatus(), refreshDictationState()]).then(() => {
   void autoOpenGoogleDocsIfNeeded();
