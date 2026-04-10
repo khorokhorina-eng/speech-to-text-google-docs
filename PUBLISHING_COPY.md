@@ -6,7 +6,7 @@ Speech to Text Google Docs
 
 ## Short Description
 
-Record speech, transcribe it with OpenAI, then copy and paste the text into Google Docs.
+Use Speech to Text Google Docs for OpenAI-powered voice to text in Google Docs, with simple recording and fast dictation.
 
 ## Detailed Description
 
