@@ -87,7 +87,7 @@ body { width: 100%; min-width: 360px; }
 .hero-copy { margin: 14px 0 0; font-size: 14px; line-height: 1.5; color: var(--muted); max-width: 250px; }
 .trial-banner { padding: 14px 16px; background: #eef3ff; }
 .trial-banner-title { margin: 0 0 6px; font-size: 14px; font-weight: 650; }
-.trial-banner-copy, .paywall-status, .auth-message, .drawer-plan-meta, .micro-copy, .paywall-billing-note, .file-meta-label {
+.trial-banner-copy, .paywall-status, .auth-message, .drawer-plan-meta, .paywall-billing-note, .file-meta-label {
   margin: 0; color: var(--muted); font-size: 13px; line-height: 1.45;
 }
 .trial-upgrade-btn {
@@ -124,7 +124,6 @@ body[data-status="error"] .live-dot { background: #c1624b; box-shadow: 0 0 0 8px
 .countdown-fill { width: 0%; height: 100%; border-radius: inherit; background: linear-gradient(90deg, var(--accent) 0%, var(--accent-deep) 100%); transition: width .2s ease; }
 .file-meta-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 .file-name { margin: 8px 0 0; font-size: 15px; font-weight: 620; line-height: 1.35; word-break: break-word; }
-.micro-copy { padding: 0 4px; }
 .footer-row { display: flex; justify-content: flex-start; padding: 0 2px 6px; }
 .text-link { padding: 0; border: 0; background: transparent; color: var(--accent-deep); font-size: 13px; font-weight: 700; }
 .account-drawer {
@@ -142,31 +141,33 @@ body.drawer-open .account-drawer { transform: translateX(0); }
 .drawer-label { margin: 0; font-size: 13px; font-weight: 650; color: var(--muted); }
 .drawer-value { margin: 0; font-size: 18px; line-height: 1.2; font-weight: 620; color: #232835; }
 .drawer-divider { height: 1px; background: rgba(223,230,244,.9); }
-.paywall-card { padding: 18px; display: flex; flex-direction: column; gap: 12px; }
-.paywall-title { font-size: 32px; line-height: .98; font-weight: 620; color: #232835; }
+.paywall-card { padding: 14px; display: flex; flex-direction: column; gap: 8px; }
+.paywall-title { font-size: 26px; line-height: 1; font-weight: 620; color: #232835; }
+.paywall-status { font-size: 11px; line-height: 1.3; }
 .auth-panel {
-  border: 1px solid var(--line); border-radius: 20px; padding: 12px 14px; background: rgba(255,255,255,.72); display: grid; gap: 10px;
+  border: 1px solid var(--line); border-radius: 18px; padding: 10px 12px; background: rgba(255,255,255,.72); display: grid; gap: 8px;
 }
 .auth-signed-in { display: flex; justify-content: space-between; gap: 10px; align-items: center; }
 .auth-signed-in-text { margin: 0; font-size: 13px; line-height: 1.4; color: var(--muted); }
-.paywall-grid { display: grid; gap: 10px; }
+.paywall-grid { display: grid; gap: 8px; }
 .paywall-plan-card {
-  position: relative; background: rgba(255,255,255,.96); border: 1px solid rgba(223,230,244,.96); border-radius: 24px; padding: 18px 18px 16px; box-shadow: var(--shadow); display: grid; gap: 10px;
+  position: relative; background: rgba(255,255,255,.96); border: 1px solid rgba(223,230,244,.96); border-radius: 22px; padding: 14px 14px 12px; box-shadow: var(--shadow); display: grid; gap: 8px;
 }
 .paywall-plan-card.featured {
   background: radial-gradient(circle at top center, rgba(95,132,255,.16), transparent 54%), linear-gradient(180deg, rgba(255,255,255,.98), rgba(242,246,255,.98));
 }
 .plan-badge {
-  position: absolute; top: 14px; right: 16px; padding: 6px 12px; border-radius: 999px; background: var(--green-soft); color: var(--green-ink); font-size: 11px; font-weight: 700;
+  position: absolute; top: 12px; right: 14px; padding: 5px 10px; border-radius: 999px; background: var(--green-soft); color: var(--green-ink); font-size: 10px; font-weight: 700;
 }
-.paywall-plan-title { font-size: 24px; line-height: 1.02; font-weight: 620; color: #232835; }
+.paywall-plan-title { font-size: 21px; line-height: 1.04; font-weight: 620; color: #232835; }
 .paywall-price-row { display: flex; align-items: baseline; gap: 6px; }
-.paywall-price { font-size: 54px; line-height: .92; font-weight: 700; letter-spacing: -.05em; }
-.paywall-price-unit { font-size: 20px; font-weight: 550; color: var(--muted); }
-.feature-list { margin: 0; padding: 0; list-style: none; display: grid; gap: 8px; }
-.feature-list li { position: relative; padding-left: 22px; font-size: 14px; line-height: 1.4; color: #313743; }
+.paywall-price { font-size: 42px; line-height: .92; font-weight: 700; letter-spacing: -.05em; }
+.paywall-price-unit { font-size: 16px; font-weight: 550; color: var(--muted); }
+.feature-list { margin: 0; padding: 0; list-style: none; display: grid; gap: 6px; }
+.feature-list li { position: relative; padding-left: 18px; font-size: 13px; line-height: 1.35; color: #313743; }
 .feature-list li::before {
   content: "✓"; position: absolute; left: 0; top: 0; color: var(--green-ink); font-weight: 700;
 }
+.subscribe-btn { min-height: 48px; font-size: 14px; }
 @keyframes fade-in { from { opacity: 0; transform: translateY(4px);} to { opacity: 1; transform: translateY(0);} }
 @keyframes spin { to { transform: rotate(360deg);} }

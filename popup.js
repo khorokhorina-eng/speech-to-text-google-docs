@@ -88,6 +88,19 @@ let authSuccessToastTimer = null;
 let authPollingTimer = null;
 let authReturnScreen = "paywall";
 
+async function getReturnUrlForAuth() {
+  try {
+    const tabs = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
+    const url = tabs?.[0]?.url || "";
+    if (typeof url === "string" && url.startsWith("https://")) {
+      return url;
+    }
+  } catch (_error) {
+    // Fall back to extension page below.
+  }
+  return chrome.runtime.getURL("paywall.html");
+}
+
 function getPlanLabel(plan) {
   const planId = plan?.planId || "";
   if (planId === "annual") return "Annual plan";
@@ -99,6 +112,14 @@ function formatMinutesForDisplay(value) {
   const numeric = Number(value);
   if (!Number.isFinite(numeric) || numeric <= 0) return 0;
   return Math.max(0, Math.ceil(numeric));
+}
+
+function formatTrialSeconds(value) {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric) || numeric <= 0) {
+    return "0 sec";
+  }
+  return `${Math.max(0, Math.ceil(numeric * 60))} sec`;
 }
 
 function sendRuntimeMessage(message) {
@@ -189,7 +210,7 @@ function getPlanPresentation() {
     name: "Free Trial",
     meta:
       formatMinutesForDisplay(state.subscription.minutesLeft) > 0
-        ? `${formatMinutesForDisplay(state.subscription.minutesLeft)} free minutes remaining.`
+        ? `${formatTrialSeconds(state.subscription.minutesLeft)} remaining in your free trial.`
         : "Upgrade to unlock premium dictation.",
   };
 }
@@ -233,7 +254,7 @@ function updateAuthUI() {
   authSignedInTextEl.textContent = state.auth.signedIn ? `Signed in as ${state.auth.email}` : "";
   authMessageEl.textContent = state.auth.signedIn
     ? ""
-    : "Use your free trial first. Sign in with Google when you want to buy a plan.";
+    : "Sign in to continue to checkout.";
 
   if (isAuthenticating && state.auth.signedIn) {
     setAuthenticating(false);
@@ -248,7 +269,7 @@ function updateQuotaUI() {
     quotaEl.textContent = `${getPlanLabel(state.subscription.plan)} · ${minutesLeft} minutes left`;
     return;
   }
-  quotaEl.textContent = `${minutesLeft} free minutes left`;
+  quotaEl.textContent = `${formatTrialSeconds(state.subscription.minutesLeft)} left in trial`;
 }
 
 function updateDictationUI() {
@@ -288,7 +309,7 @@ function updateDictationUI() {
     startBtn.disabled = true;
     hintEl.textContent = "Open a Google Docs document first.";
   } else if (dictation.status === "idle" && !dictation.cursorReady) {
-    hintEl.textContent = "Click inside the Google Docs editor, then record your voice.";
+    hintEl.textContent = "Click inside Google Docs, record your voice, and the transcript will appear after recording ends.";
   }
 }
 
@@ -336,7 +357,7 @@ async function loadSubscriptionStatus() {
       setPaywallStatus(
         state.auth.signedIn
           ? "No active subscription detected."
-          : "Sign in before checkout to keep your paid plan attached to your account."
+          : "Choose a plan and continue with Google."
       );
     }
   }
@@ -402,9 +423,10 @@ async function signInWithGoogle() {
   authGoogleBtn.textContent = "Opening Google...";
   setAuthenticating(true);
   try {
+    const returnUrl = await getReturnUrlForAuth();
     await sendRuntimeMessage({
       type: "startGoogleSignIn",
-      returnUrl: chrome.runtime.getURL("paywall.html"),
+      returnUrl,
     });
     setPaywallStatus("Complete Google sign-in in the opened tab, then return here.");
   } catch (error) {
@@ -437,7 +459,7 @@ function openPaywall() {
       setPaywallStatus(
         state.auth.signedIn
           ? "No active subscription detected."
-          : "Sign in before checkout to keep your paid plan attached to your account."
+          : "Choose a plan and continue with Google."
       );
     }
   });

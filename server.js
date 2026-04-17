@@ -189,7 +189,7 @@ function getPublicUrl(pathname) {
   return `${PUBLIC_BASE_URL}${pathname}`;
 }
 
-function sanitizeExtensionReturnUrl(value) {
+function sanitizeReturnUrl(value) {
   if (typeof value !== "string") {
     return "";
   }
@@ -201,7 +201,7 @@ function sanitizeExtensionReturnUrl(value) {
 
   try {
     const parsed = new URL(trimmed);
-    if (parsed.protocol !== "chrome-extension:") {
+    if (!["chrome-extension:", "https:"].includes(parsed.protocol)) {
       return "";
     }
     parsed.hash = "";
@@ -683,12 +683,17 @@ async function handleAuthMe(req, res, parsedUrl) {
 function renderAuthCompletePage(title, message, returnUrl = "") {
   const isSuccess = title === "Google sign-in complete";
   const accentLabel = isSuccess ? "SIGNED IN SUCCESSFULLY" : "SIGN-IN STATUS";
-  const helperText = isSuccess
-    ? "Now open the extension again."
-    : "Return to the extension and try again.";
-  const bodyText = isSuccess
-    ? "Click the extension icon in your browser toolbar to return to Speech to Text Google Docs."
-    : message;
+  const helperText = isSuccess ? "You are signed in successfully." : "Something went wrong.";
+  const bodyText = isSuccess ? "Redirecting you back now." : message;
+  const safeReturnUrl = sanitizeReturnUrl(returnUrl);
+  const redirectScript =
+    isSuccess && safeReturnUrl
+      ? `<script>
+          window.setTimeout(() => {
+            window.location.assign(${JSON.stringify(safeReturnUrl)});
+          }, 2200);
+        </script>`
+      : "";
 
   return `<!doctype html>
 <html lang="en">
@@ -701,76 +706,68 @@ function renderAuthCompletePage(title, message, returnUrl = "") {
       body {
         margin: 0;
         min-height: 100vh;
-        font-family: Georgia, "Times New Roman", serif;
+        font-family: Manrope, "Avenir Next", "Segoe UI", "Helvetica Neue", Arial, sans-serif;
         background:
-          radial-gradient(circle at top, rgba(204, 120, 72, 0.12), transparent 34%),
-          #efe6d7;
-        color: #1f1b16;
+          radial-gradient(circle at top, rgba(95, 132, 255, 0.18), transparent 30%),
+          radial-gradient(circle at top left, rgba(53, 95, 216, 0.1), transparent 26%),
+          linear-gradient(180deg, #fbfcff 0%, #f5f7ff 100%);
+        color: #191c24;
         display: flex;
         align-items: center;
         justify-content: center;
         padding: 24px;
       }
       .card {
-        width: min(980px, 100%);
-        background: rgba(255, 251, 245, 0.92);
-        border: 1px solid rgba(150, 126, 94, 0.18);
-        border-radius: 34px;
-        padding: 30px 30px 34px;
-        box-shadow: 0 28px 80px rgba(86, 64, 38, 0.18);
+        width: min(760px, 100%);
+        background: rgba(255, 255, 255, 0.96);
+        border: 1px solid rgba(223, 230, 244, 0.96);
+        border-radius: 30px;
+        padding: 30px;
+        box-shadow: 0 22px 54px rgba(25, 28, 36, 0.08);
       }
       .eyebrow {
         margin: 0 0 8px;
-        font: 700 14px/1.3 Arial, sans-serif;
+        font: 700 12px/1.3 Manrope, "Avenir Next", "Segoe UI", "Helvetica Neue", Arial, sans-serif;
         letter-spacing: 0.16em;
         text-transform: uppercase;
-        color: #c36a3a;
+        color: #7388bf;
       }
       h1 {
-        margin: 0;
-        font-size: clamp(48px, 7vw, 78px);
-        line-height: 0.94;
-        letter-spacing: -0.05em;
+        margin: 0 0 14px;
+        font-size: clamp(24px, 4vw, 34px);
+        line-height: 1;
+        letter-spacing: -0.03em;
+        font-weight: 620;
       }
       .message {
-        margin: 16px 0 0;
-        font-size: 22px;
-        line-height: 1.45;
-      }
-      .hero {
-        margin-top: 24px;
-        border: 1px solid rgba(164, 177, 217, 0.38);
-        border-radius: 28px;
-        overflow: hidden;
-        background: #fff;
-      }
-      .hero img {
-        display: block;
-        width: 100%;
-        height: auto;
+        margin: 0;
+        font-size: 16px;
+        line-height: 1.5;
+        color: #72798b;
       }
       .next-title {
-        margin: 24px 0 0;
-        font-size: clamp(34px, 4vw, 54px);
-        line-height: 0.98;
-        letter-spacing: -0.04em;
+        margin: 0;
+        font-size: 20px;
+        line-height: 1.2;
+        letter-spacing: -0.02em;
+        font-weight: 620;
       }
       .next-copy {
-        margin: 10px 0 0;
-        font-size: 18px;
-        line-height: 1.5;
-        color: #655a4b;
+        margin: 6px 0 0;
+        font-size: 14px;
+        line-height: 1.45;
+        color: #72798b;
+      }
+      .redirect-note {
+        margin: 12px 0 0;
+        font-size: 13px;
+        line-height: 1.45;
+        color: #8a95b0;
       }
       @media (max-width: 640px) {
         .card {
-          padding: 22px 20px 26px;
+          padding: 22px 20px 24px;
           border-radius: 26px;
-        }
-        .message {
-          font-size: 18px;
-        }
-        .next-copy {
-          font-size: 16px;
         }
       }
     </style>
@@ -779,20 +776,18 @@ function renderAuthCompletePage(title, message, returnUrl = "") {
     <main class="card">
       <p class="eyebrow">${accentLabel}</p>
       <h1>${title}</h1>
-      <p class="message">${message}</p>
       <h2 class="next-title">${helperText}</h2>
       <p class="next-copy">${bodyText}</p>
-      <section class="hero" aria-hidden="true">
-        <img src="${getPublicUrl("/icons/welcome-pin.svg")}" alt="" />
-      </section>
+      ${isSuccess && safeReturnUrl ? '<p class="redirect-note">You will be redirected back in a moment.</p>' : ""}
     </main>
+    ${redirectScript}
   </body>
 </html>`;
 }
 
 async function handleGoogleStart(req, res, parsedUrl) {
   const deviceToken = getDeviceToken(req, parsedUrl, null);
-  const returnUrl = sanitizeExtensionReturnUrl(parsedUrl.searchParams.get("return_url") || "");
+  const returnUrl = sanitizeReturnUrl(parsedUrl.searchParams.get("return_url") || "");
 
   if (!deviceToken) {
     sendHtml(
@@ -957,7 +952,7 @@ async function handleCreateCheckoutSession(req, res, parsedUrl) {
       : typeof body.plan === "string"
       ? body.plan.trim()
       : "";
-  const returnUrl = sanitizeExtensionReturnUrl(body.returnUrl || body.return_url || "");
+  const returnUrl = sanitizeReturnUrl(body.returnUrl || body.return_url || "");
   if (!deviceToken || !rawPlanId) {
     sendJson(res, 400, { error: "device_token and plan are required." });
     return;

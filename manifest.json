@@ -15,13 +15,15 @@
   },
   "action": {
     "default_title": "Speech to Text Google Docs",
-    "default_popup": "popup.html",
     "default_icon": {
       "16": "icons/icon16.png",
       "32": "icons/icon32.png"
     }
   },
-  "permissions": ["storage", "scripting", "debugger"],
+  "side_panel": {
+    "default_path": "popup.html"
+  },
+  "permissions": ["storage", "scripting", "debugger", "sidePanel", "tabs"],
   "optional_permissions": ["activeTab"],
   "host_permissions": [
     "https://docs.google.com/*",

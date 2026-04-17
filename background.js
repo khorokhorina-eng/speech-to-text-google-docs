@@ -17,11 +17,26 @@ let subscriptionCache = {
 
 const tabStateCache = new Map();
 
+async function configureSidePanelBehavior() {
+  if (!chrome.sidePanel?.setPanelBehavior) {
+    return;
+  }
+
+  try {
+    await chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: true });
+  } catch (_error) {
+    // Best-effort; keep extension usable even if Chrome rejects the call.
+  }
+}
+
+void configureSidePanelBehavior();
+
 function isRemoteConfigured() {
   return Boolean(REMOTE_API_BASE_URL) && !/your-domain\.com/i.test(REMOTE_API_BASE_URL);
 }
 
 chrome.runtime.onInstalled.addListener((details) => {
+  void configureSidePanelBehavior();
   if (details.reason !== "install") {
     return;
   }
@@ -30,6 +45,10 @@ chrome.runtime.onInstalled.addListener((details) => {
   chrome.tabs.create({
     url: "https://voicetext.world/welcome.html",
   });
+});
+
+chrome.runtime.onStartup?.addListener(() => {
+  void configureSidePanelBehavior();
 });
 
 function readStorage(keys) {
