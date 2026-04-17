@@ -16,7 +16,7 @@ const state = {
   isDocsPage: location.href.startsWith("https://docs.google.com/document/"),
   status: HAS_RECORDING_SUPPORT ? "idle" : "unsupported",
   message: HAS_RECORDING_SUPPORT
-    ? "Place the cursor in Google Docs, record your voice, then paste the transcript into the document."
+    ? "Place the cursor in Google Docs, record your voice, click Stop and transcribe, and your text will appear in the document."
     : "This browser does not support microphone recording for this extension.",
   transcript: "",
   interimTranscript: "",
@@ -1215,11 +1215,13 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   }
 
   if (message.type === "stopDictation") {
-    sendResponse({ ok: true, state });
-    stopDictation().catch((error) => {
-      lastErrorMessage = error.message || "Unable to stop dictation.";
-      setStatus("error", lastErrorMessage);
-    });
+    stopDictation()
+      .then(() => sendResponse({ ok: true, state }))
+      .catch((error) => {
+        lastErrorMessage = error.message || "Unable to stop dictation.";
+        setStatus("error", lastErrorMessage);
+        sendResponse({ ok: false, error: lastErrorMessage });
+      });
     return true;
   }
 

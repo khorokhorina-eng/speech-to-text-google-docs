@@ -398,6 +398,9 @@ async function startDictation() {
 }
 
 async function stopDictation() {
+  state.dictation.status = "starting";
+  state.dictation.message = "Transcribing your recording...";
+  updateUI();
   try {
     await sendRuntimeMessage({ type: "stopDictation" });
   } catch (_error) {}
