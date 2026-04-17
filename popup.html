@@ -7,107 +7,150 @@
     <link rel="stylesheet" href="popup.css" />
   </head>
   <body>
-    <main class="container">
-      <section class="hero">
-        <div class="hero-copy">
-          <p class="eyebrow">Voice input for Docs</p>
-          <h1 class="title">Speech to Text Google Docs</h1>
+    <div class="app-shell">
+      <div id="authToast" class="auth-toast hidden" aria-live="polite"></div>
+      <div id="authOverlay" class="auth-overlay hidden" aria-hidden="true">
+        <div class="auth-overlay-card">
+          <div class="spinner"></div>
+          <p class="auth-overlay-title">Authenticating</p>
+          <p class="auth-overlay-copy">Complete the sign-in in your browser.</p>
         </div>
-        <button id="upgrade" class="chip-btn">Get plan</button>
-      </section>
-
-      <section class="status-panel">
-        <div class="status-copy">
-          <div class="status-line">
-            <p id="status" class="status">Ready</p>
-            <span class="live-dot" aria-hidden="true"></span>
-          </div>
-          <p id="hint" class="hint">
-            Record up to 2 minutes, review the transcript, then paste it into Google Docs with Cmd+V.
-          </p>
-        </div>
-      </section>
-
-      <section class="controls-panel">
-        <div id="countdown" class="countdown hidden" aria-label="Recording time remaining">
-          <div id="countdownFill" class="countdown-fill"></div>
-        </div>
-        <button id="start" class="primary">Start recording</button>
-        <button id="stop" class="primary hidden" disabled>Stop and transcribe</button>
-      </section>
-
-      <section class="meta-panel">
-        <div class="meta-row">
-          <div class="doc-copy">
-            <p class="doc-label">Current document</p>
-            <p id="docTitle" class="doc-title">No active Google Docs tab</p>
-          </div>
-          <p id="quota" class="quota">10 free minutes included</p>
-        </div>
-        <div class="meta-row meta-row-account">
-          <div class="account-copy">
-            <p class="account-label">Account</p>
-            <p id="accountState" class="account-state">Not signed in</p>
-          </div>
-          <button id="accountAction" class="account-btn">Sign in</button>
-        </div>
-      </section>
-
-      <div class="footer-links">
-        <button id="pricingLink" class="link-btn">Pricing</button>
-        <button id="contact" class="link-btn">Contact us</button>
       </div>
-    </main>
 
-    <section id="paywallModal" class="paywall-modal hidden">
-      <div class="paywall-sheet">
-        <div class="paywall-top">
-          <div>
-            <p class="paywall-kicker">Listening plans</p>
-            <h2 class="paywall-title">Choose your plan</h2>
-          </div>
-          <button id="closePaywall" class="paywall-close" aria-label="Close paywall">×</button>
+      <div id="drawerBackdrop" class="drawer-backdrop hidden"></div>
+      <aside class="account-drawer" aria-label="Account panel">
+        <div class="drawer-header">
+          <div class="drawer-avatar"><span class="avatar-glyph" aria-hidden="true"></span></div>
+          <button id="closeDrawer" class="icon-btn" aria-label="Close account panel">×</button>
         </div>
-        <p id="paywallStatus" class="paywall-status">Checking subscription status...</p>
-        <section class="auth-panel">
-          <div id="authCopy" class="auth-copy">
-            <p class="auth-label">Sign in before checkout</p>
-            <p id="authMessage" class="auth-message">
-              Use your free trial first. Sign in with Google when you want to buy a plan.
-            </p>
+
+        <section class="drawer-summary-card">
+          <div class="drawer-block">
+            <p class="drawer-label">Account</p>
+            <p id="drawerEmail" class="drawer-value">Guest mode</p>
           </div>
-          <button id="authGoogle" class="auth-google">Continue with Google</button>
-          <div id="authSignedIn" class="auth-signed-in hidden">
-            <p id="authSignedInText" class="auth-signed-in-text">Signed in as</p>
-            <button id="authSignOut" class="link-btn auth-signout">Sign out</button>
+          <div class="drawer-divider"></div>
+          <div class="drawer-block">
+            <p class="drawer-label">Current plan</p>
+            <p id="drawerPlanName" class="drawer-value">Free Trial</p>
+            <p id="drawerPlanMeta" class="drawer-plan-meta">10 free minutes included.</p>
           </div>
         </section>
-        <div id="paywallPlans" class="paywall-plans">
-          <button class="plan-card selected" data-plan-id="monthly">
-            <span class="plan-main">
-              <span class="plan-eyebrow">1-MONTH PLAN</span>
-              <span class="plan-total">$9.99 per month</span>
-            </span>
-            <span class="plan-side">
-              <span class="plan-day-price">$0.33</span>
-              <span class="plan-day-period">PER DAY</span>
-            </span>
+
+        <button id="drawerUpgrade" class="drawer-upgrade-btn">Upgrade</button>
+        <button id="accountAction" class="drawer-link-btn">Sign in with Google</button>
+      </aside>
+
+      <main class="panel-shell">
+        <header class="panel-header">
+          <button id="profileTrigger" class="profile-trigger" aria-label="Open account panel">
+            <span class="profile-trigger-icon"><span class="avatar-glyph" aria-hidden="true"></span></span>
+            <span class="profile-trigger-text">Account</span>
           </button>
-          <button class="plan-card featured" data-plan-id="annual">
-            <span class="plan-badge accent-badge">MOST POPULAR</span>
-            <span class="plan-main">
-              <span class="plan-eyebrow">12-MONTH PLAN</span>
-              <span class="plan-total">$89.99 per year</span>
-            </span>
-            <span class="plan-side">
-              <span class="plan-day-price">$0.25</span>
-              <span class="plan-day-period">PER DAY</span>
-            </span>
-          </button>
-        </div>
-        <button id="continueCheckout" class="continue-btn">Continue</button>
-      </div>
-    </section>
+          <div class="header-spacer"></div>
+          <button id="upgrade" class="ghost-btn">Get plan</button>
+          <button id="backToReader" class="ghost-btn hidden">Back</button>
+        </header>
+
+        <section id="readerScreen" class="screen">
+          <section class="hero-card">
+            <p class="eyebrow">Voice input for Docs</p>
+            <h1 class="hero-title">Speech to Text Google Docs</h1>
+            <p id="hint" class="hero-copy">Open a Google Docs document to begin.</p>
+          </section>
+
+          <section id="trialEndedNotice" class="trial-banner hidden">
+            <p class="trial-banner-title">Free trial ended</p>
+            <p class="trial-banner-copy">Upgrade to keep dictating in Google Docs.</p>
+            <button id="trialUpgrade" class="trial-upgrade-btn">Upgrade to premium</button>
+          </section>
+
+          <section class="status-card">
+            <div class="status-line">
+              <p id="status" class="status-text">Ready</p>
+              <span class="live-dot" aria-hidden="true"></span>
+            </div>
+            <p id="quota" class="status-subcopy">10 free minutes included</p>
+            <div id="countdown" class="countdown hidden" aria-label="Recording time remaining">
+              <div id="countdownFill" class="countdown-fill"></div>
+            </div>
+          </section>
+
+          <section class="reader-controls" id="readerControls">
+            <button id="start" class="primary-action">Start recording</button>
+            <button id="stop" class="primary-action hidden" disabled>Stop and transcribe</button>
+          </section>
+
+          <section class="file-card">
+            <div class="file-meta-row">
+              <div>
+                <p class="file-meta-label">Current document</p>
+                <p id="docTitle" class="file-name">No active Google Docs tab</p>
+              </div>
+            </div>
+          </section>
+
+          <p class="micro-copy">Record first, then paste the transcript into Google Docs with Cmd+V.</p>
+
+          <footer class="footer-row">
+            <button id="contact" class="text-link">Contact us</button>
+          </footer>
+        </section>
+
+        <section id="paywallScreen" class="screen hidden">
+          <section class="paywall-card">
+            <p class="eyebrow">Listening plans</p>
+            <h2 class="paywall-title">Unlock premium dictation</h2>
+            <p id="paywallStatus" class="paywall-status">Checking subscription status...</p>
+
+            <section id="authPanel" class="auth-panel">
+              <div id="authCopy">
+                <p class="drawer-label">Sign in before checkout</p>
+                <p id="authMessage" class="auth-message">Use your free trial first. Sign in with Google when you want to buy a plan.</p>
+              </div>
+              <button id="authGoogle" class="auth-google">Continue with Google</button>
+              <div id="authSignedIn" class="auth-signed-in hidden">
+                <p id="authSignedInText" class="auth-signed-in-text"></p>
+                <button id="authSignOut" class="text-link auth-signout">Sign out</button>
+              </div>
+            </section>
+
+            <div class="paywall-grid">
+              <article class="paywall-plan-card" data-plan-id="monthly">
+                <p class="paywall-plan-title">Monthly</p>
+                <div class="paywall-price-row">
+                  <span class="paywall-price">$0.33</span>
+                  <span class="paywall-price-unit">/day</span>
+                </div>
+                <p class="paywall-billing-note">Billed monthly $9.99 / month</p>
+                <ul class="feature-list">
+                  <li>Longer dictation sessions</li>
+                  <li>Faster workflow in Google Docs</li>
+                  <li>Premium support access</li>
+                </ul>
+                <button id="continueCheckoutMonthly" class="subscribe-btn">Subscribe monthly</button>
+              </article>
+
+              <article class="paywall-plan-card featured" data-plan-id="annual">
+                <p class="plan-badge">Best Value</p>
+                <p class="paywall-plan-title">Yearly</p>
+                <div class="paywall-price-row">
+                  <span class="paywall-price">$0.25</span>
+                  <span class="paywall-price-unit">/day</span>
+                </div>
+                <p class="paywall-billing-note">Billed annually $89.99 / year</p>
+                <ul class="feature-list">
+                  <li>Best price for everyday dictation</li>
+                  <li>Longer sessions without trial limits</li>
+                  <li>Premium support access</li>
+                </ul>
+                <button id="continueCheckoutAnnual" class="subscribe-btn">Subscribe yearly</button>
+              </article>
+            </div>
+          </section>
+        </section>
+      </main>
+    </div>
     <script src="popup.js"></script>
   </body>
 </html>

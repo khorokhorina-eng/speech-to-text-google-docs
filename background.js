@@ -26,8 +26,9 @@ chrome.runtime.onInstalled.addListener((details) => {
     return;
   }
 
+  chrome.storage.local.set({ welcomeShown: true });
   chrome.tabs.create({
-    url: chrome.runtime.getURL("welcome.html"),
+    url: "https://voicetext.world/welcome.html",
   });
 });
 
@@ -722,16 +723,6 @@ async function stopDictation() {
 }
 
 async function openGoogleDocs() {
-  const docsTabs = await queryDocsTabs().catch(() => []);
-  const existingTab = docsTabs.find((tab) =>
-    typeof tab.url === "string" && tab.url.startsWith("https://docs.google.com/document/")
-  );
-
-  if (existingTab?.id) {
-    await activateTab(existingTab.id, existingTab.windowId);
-    return { opened: true, reused: true, tabId: existingTab.id };
-  }
-
   const createdTab = await chrome.tabs.create({ url: "https://docs.google.com/document/create" });
   return { opened: true, reused: false, tabId: createdTab?.id || null };
 }

@@ -12,6 +12,17 @@ const authSignOutBtn = document.getElementById("authSignOut");
 let currentSubscription = { active: false, plan: null };
 let authState = { signedIn: false, email: "", method: null };
 
+function getPlanLabel(plan) {
+  const planId = plan?.planId || "";
+  if (planId === "annual") {
+    return "Annual plan";
+  }
+  if (planId === "monthly") {
+    return "Monthly plan";
+  }
+  return "Paid plan";
+}
+
 function setStatus(text, ok = false) {
   statusEl.textContent = text;
   statusEl.classList.toggle("ok", ok);
@@ -61,7 +72,7 @@ async function loadAuthState() {
   authSignedInTextEl.textContent = authState.signedIn ? `Signed in as ${authState.email}` : "";
   authMessageEl.textContent = authState.signedIn
     ? ""
-    : "Use your 10 free minutes first. Sign in with Google when you want to buy a plan.";
+    : "Use your free trial first. Sign in with Google when you want to buy a plan.";
   updateButtons();
 }
 
@@ -98,7 +109,8 @@ async function openCheckout(planId, button) {
   }
   await loadAuthState();
   if (!authState.signedIn) {
-    setStatus("Sign in before continuing to Stripe.");
+    setStatus("Sign in with Google to continue.");
+    await signInWithGoogle();
     return;
   }
 
@@ -140,9 +152,7 @@ async function loadSubscriptionStatus() {
     updateButtons();
 
     if (currentSubscription.active) {
-      const planName =
-        currentSubscription.plan?.planId === "annual" ? "Yearly plan" : "Monthly plan";
-      setStatus(`Subscription active. Current plan: ${planName}.`, true);
+      setStatus(`Subscription active. Current plan: ${getPlanLabel(currentSubscription.plan)}.`, true);
       return;
     }
 

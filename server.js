@@ -681,25 +681,111 @@ async function handleAuthMe(req, res, parsedUrl) {
 }
 
 function renderAuthCompletePage(title, message, returnUrl = "") {
-  const safeReturn = sanitizeExtensionReturnUrl(returnUrl);
-  const cta = safeReturn
-    ? `<p><a href="${safeReturn}">Return to the extension</a></p>`
-    : `<p>You can now return to the extension and continue.</p>`;
+  const isSuccess = title === "Google sign-in complete";
+  const accentLabel = isSuccess ? "SIGNED IN SUCCESSFULLY" : "SIGN-IN STATUS";
+  const helperText = isSuccess
+    ? "Now open the extension again."
+    : "Return to the extension and try again.";
+  const bodyText = isSuccess
+    ? "Click the extension icon in your browser toolbar to return to Speech to Text Google Docs."
+    : message;
 
   return `<!doctype html>
-<html>
+<html lang="en">
   <head>
     <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>${title}</title>
     <style>
-      body { font-family: Arial, sans-serif; padding: 32px; background: #f8fafc; color: #0f172a; }
-      a { color: #2563eb; }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        min-height: 100vh;
+        font-family: Georgia, "Times New Roman", serif;
+        background:
+          radial-gradient(circle at top, rgba(204, 120, 72, 0.12), transparent 34%),
+          #efe6d7;
+        color: #1f1b16;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding: 24px;
+      }
+      .card {
+        width: min(980px, 100%);
+        background: rgba(255, 251, 245, 0.92);
+        border: 1px solid rgba(150, 126, 94, 0.18);
+        border-radius: 34px;
+        padding: 30px 30px 34px;
+        box-shadow: 0 28px 80px rgba(86, 64, 38, 0.18);
+      }
+      .eyebrow {
+        margin: 0 0 8px;
+        font: 700 14px/1.3 Arial, sans-serif;
+        letter-spacing: 0.16em;
+        text-transform: uppercase;
+        color: #c36a3a;
+      }
+      h1 {
+        margin: 0;
+        font-size: clamp(48px, 7vw, 78px);
+        line-height: 0.94;
+        letter-spacing: -0.05em;
+      }
+      .message {
+        margin: 16px 0 0;
+        font-size: 22px;
+        line-height: 1.45;
+      }
+      .hero {
+        margin-top: 24px;
+        border: 1px solid rgba(164, 177, 217, 0.38);
+        border-radius: 28px;
+        overflow: hidden;
+        background: #fff;
+      }
+      .hero img {
+        display: block;
+        width: 100%;
+        height: auto;
+      }
+      .next-title {
+        margin: 24px 0 0;
+        font-size: clamp(34px, 4vw, 54px);
+        line-height: 0.98;
+        letter-spacing: -0.04em;
+      }
+      .next-copy {
+        margin: 10px 0 0;
+        font-size: 18px;
+        line-height: 1.5;
+        color: #655a4b;
+      }
+      @media (max-width: 640px) {
+        .card {
+          padding: 22px 20px 26px;
+          border-radius: 26px;
+        }
+        .message {
+          font-size: 18px;
+        }
+        .next-copy {
+          font-size: 16px;
+        }
+      }
     </style>
   </head>
   <body>
-    <h1>${title}</h1>
-    <p>${message}</p>
-    ${cta}
+    <main class="card">
+      <p class="eyebrow">${accentLabel}</p>
+      <h1>${title}</h1>
+      <p class="message">${message}</p>
+      <h2 class="next-title">${helperText}</h2>
+      <p class="next-copy">${bodyText}</p>
+      <section class="hero" aria-hidden="true">
+        <img src="${getPublicUrl("/icons/welcome-pin.svg")}" alt="" />
+      </section>
+    </main>
   </body>
 </html>`;
 }
@@ -947,6 +1033,7 @@ async function handleSubscriptionStatus(req, res, parsedUrl) {
       customerId: null,
       email: null,
       signedIn: false,
+      minutesLeft: FREE_MINUTES,
     });
     return;
   }
