@@ -104,6 +104,26 @@ button:disabled { opacity: .56; cursor: not-allowed; }
 .primary-action, .auth-google {
   min-height: 56px; padding: 0 18px; background: linear-gradient(180deg, var(--accent-soft) 0%, #aec3ff 100%); color: var(--accent-ink); box-shadow: 0 16px 32px rgba(95,132,255,.18);
 }
+.primary-action.is-processing {
+  position: relative;
+  background: linear-gradient(180deg, #dbe5ff 0%, #c4d4ff 100%);
+  color: #43547e;
+  opacity: 1;
+  box-shadow: none;
+  cursor: wait;
+}
+.primary-action.is-processing::before {
+  content: "";
+  display: inline-block;
+  width: 14px;
+  height: 14px;
+  margin-right: 9px;
+  border-radius: 999px;
+  border: 2px solid rgba(67, 84, 126, 0.28);
+  border-top-color: #43547e;
+  vertical-align: -2px;
+  animation: spin 0.75s linear infinite;
+}
 .secondary-action {
   min-height: 48px; padding: 0 16px; background: var(--surface); color: var(--ink); border: 1px solid var(--line);
 }

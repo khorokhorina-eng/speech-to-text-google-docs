@@ -46,6 +46,7 @@ const OPENAI_TTS_VOICE = process.env.OPENAI_TTS_VOICE || "alloy";
 const OPENAI_TRANSCRIBE_MODEL =
   process.env.OPENAI_TRANSCRIBE_MODEL || "gpt-4o-mini-transcribe";
 const FREE_MINUTES = Math.max(1, Number(process.env.FREE_MINUTES || 10));
+const FREE_TRIAL_SECONDS = Math.max(1, Math.floor(FREE_MINUTES * 60));
 const CHAR_PER_MINUTE = Math.max(1, Number(process.env.CHAR_PER_MINUTE || 900));
 const PUBLIC_BASE_URL = (process.env.PUBLIC_BASE_URL || "").replace(/\/+$/, "");
 
@@ -83,6 +84,17 @@ const stripe = STRIPE_SECRET_KEY ? new Stripe(STRIPE_SECRET_KEY) : null;
 
 function roundUsageMinutes(value) {
   return Math.max(0, Math.round(Number(value || 0) * 100) / 100);
+}
+
+function normalizeSeconds(value, fallback = 0) {
+  if (!Number.isFinite(Number(value))) {
+    return Math.max(0, Math.floor(Number(fallback) || 0));
+  }
+  return Math.max(0, Math.floor(Number(value)));
+}
+
+function displayMinutesFromSeconds(seconds) {
+  return Math.ceil(normalizeSeconds(seconds) / 60);
 }
 
 function nowIso() {
@@ -323,6 +335,7 @@ function getOrCreateDeviceUsage(state, deviceToken) {
   if (!deviceToken) {
     return {
       minutesLeft: 0,
+      remainingSeconds: 0,
       createdAt: nowIso(),
       updatedAt: nowIso(),
     };
@@ -331,35 +344,163 @@ function getOrCreateDeviceUsage(state, deviceToken) {
   if (!state.deviceUsageByToken[deviceToken]) {
     state.deviceUsageByToken[deviceToken] = {
       minutesLeft: FREE_MINUTES,
+      remainingSeconds: FREE_TRIAL_SECONDS,
       createdAt: nowIso(),
       updatedAt: nowIso(),
     };
   }
 
   const usage = state.deviceUsageByToken[deviceToken];
-  if (!Number.isFinite(Number(usage.minutesLeft))) {
-    usage.minutesLeft = FREE_MINUTES;
+  const fallbackSeconds = Number.isFinite(Number(usage.minutesLeft))
+    ? Math.ceil(Math.max(0, Number(usage.minutesLeft)) * 60)
+    : FREE_TRIAL_SECONDS;
+  if (!Number.isFinite(Number(usage.remainingSeconds))) {
+    usage.remainingSeconds = fallbackSeconds;
   }
-  usage.minutesLeft = roundUsageMinutes(usage.minutesLeft);
+  usage.remainingSeconds = Math.min(
+    FREE_TRIAL_SECONDS,
+    normalizeSeconds(usage.remainingSeconds, FREE_TRIAL_SECONDS)
+  );
+  usage.minutesLeft = displayMinutesFromSeconds(usage.remainingSeconds);
   usage.updatedAt = usage.updatedAt || nowIso();
   usage.createdAt = usage.createdAt || nowIso();
   return usage;
 }
 
-function deductDeviceMinutes(state, deviceToken, minutes) {
-  const usage = getOrCreateDeviceUsage(state, deviceToken);
-  if (usage.minutesLeft < minutes) {
+function hasClaimedAccountTrial(account) {
+  if (!account) {
     return false;
   }
-  usage.minutesLeft -= minutes;
+  return (
+    Number.isFinite(Number(account.trialRemainingSeconds)) ||
+    Boolean(account.trialClaimedAt)
+  );
+}
+
+function setDeviceUsageRemainingSeconds(state, deviceToken, remainingSeconds) {
+  if (!deviceToken) {
+    return;
+  }
+  const usage = getOrCreateDeviceUsage(state, deviceToken);
+  usage.remainingSeconds = Math.min(FREE_TRIAL_SECONDS, normalizeSeconds(remainingSeconds));
+  usage.minutesLeft = displayMinutesFromSeconds(usage.remainingSeconds);
+  usage.updatedAt = nowIso();
+}
+
+function syncDeviceUsageToAccountTrial(state, deviceToken, account) {
+  if (!deviceToken || !account || !hasClaimedAccountTrial(account)) {
+    return;
+  }
+  setDeviceUsageRemainingSeconds(state, deviceToken, account.trialRemainingSeconds);
+}
+
+function claimOrSyncAccountTrial(state, account, deviceToken) {
+  if (!account) {
+    return {
+      remainingSeconds: null,
+      previousAccountSeconds: null,
+      deviceRemainingSeconds: null,
+      reducedByAccount: false,
+    };
+  }
+
+  const deviceUsage = getOrCreateDeviceUsage(state, deviceToken);
+  const deviceRemainingSeconds = deviceUsage.remainingSeconds;
+  const previousAccountSeconds = hasClaimedAccountTrial(account)
+    ? normalizeSeconds(account.trialRemainingSeconds)
+    : null;
+
+  if (!hasClaimedAccountTrial(account)) {
+    account.trialRemainingSeconds = normalizeSeconds(
+      deviceRemainingSeconds,
+      FREE_TRIAL_SECONDS
+    );
+    account.trialClaimedAt = nowIso();
+  } else {
+    account.trialRemainingSeconds = Math.min(
+      FREE_TRIAL_SECONDS,
+      normalizeSeconds(account.trialRemainingSeconds, FREE_TRIAL_SECONDS),
+      normalizeSeconds(deviceRemainingSeconds, FREE_TRIAL_SECONDS)
+    );
+  }
+
+  account.updatedAt = nowIso();
+  syncDeviceUsageToAccountTrial(state, deviceToken, account);
+
+  return {
+    remainingSeconds: account.trialRemainingSeconds,
+    previousAccountSeconds,
+    deviceRemainingSeconds,
+    reducedByAccount:
+      Number.isFinite(previousAccountSeconds) &&
+      previousAccountSeconds < deviceRemainingSeconds &&
+      account.trialRemainingSeconds === previousAccountSeconds,
+  };
+}
+
+function getFreeTrialRemainingSeconds(state, account, deviceToken) {
+  if (!account) {
+    return getOrCreateDeviceUsage(state, deviceToken).remainingSeconds;
+  }
+  return claimOrSyncAccountTrial(state, account, deviceToken).remainingSeconds;
+}
+
+function deductDeviceSeconds(state, deviceToken, seconds) {
+  const usage = getOrCreateDeviceUsage(state, deviceToken);
+  const normalizedSeconds = normalizeSeconds(seconds);
+  if (usage.remainingSeconds < normalizedSeconds) {
+    return false;
+  }
+  usage.remainingSeconds -= normalizedSeconds;
+  usage.minutesLeft = displayMinutesFromSeconds(usage.remainingSeconds);
   usage.updatedAt = nowIso();
   return true;
 }
 
-function addDeviceMinutes(state, deviceToken, minutes) {
+function addDeviceSeconds(state, deviceToken, seconds) {
   const usage = getOrCreateDeviceUsage(state, deviceToken);
-  usage.minutesLeft += minutes;
+  usage.remainingSeconds = Math.min(
+    FREE_TRIAL_SECONDS,
+    usage.remainingSeconds + normalizeSeconds(seconds)
+  );
+  usage.minutesLeft = displayMinutesFromSeconds(usage.remainingSeconds);
   usage.updatedAt = nowIso();
+}
+
+function deductFreeTrialSeconds(state, account, deviceToken, seconds) {
+  const normalizedSeconds = normalizeSeconds(seconds);
+  if (!normalizedSeconds) {
+    return true;
+  }
+  if (!account) {
+    return deductDeviceSeconds(state, deviceToken, normalizedSeconds);
+  }
+
+  const remainingSeconds = claimOrSyncAccountTrial(state, account, deviceToken).remainingSeconds;
+  if (remainingSeconds < normalizedSeconds) {
+    return false;
+  }
+
+  account.trialRemainingSeconds = remainingSeconds - normalizedSeconds;
+  account.updatedAt = nowIso();
+  syncDeviceUsageToAccountTrial(state, deviceToken, account);
+  return true;
+}
+
+function refundFreeTrialSeconds(state, account, deviceToken, seconds) {
+  const normalizedSeconds = normalizeSeconds(seconds);
+  if (!normalizedSeconds) {
+    return;
+  }
+  if (!account) {
+    addDeviceSeconds(state, deviceToken, normalizedSeconds);
+    return;
+  }
+
+  const remainingSeconds = claimOrSyncAccountTrial(state, account, deviceToken).remainingSeconds;
+  account.trialRemainingSeconds = Math.min(FREE_TRIAL_SECONDS, remainingSeconds + normalizedSeconds);
+  account.updatedAt = nowIso();
+  syncDeviceUsageToAccountTrial(state, deviceToken, account);
 }
 
 function linkDeviceToAccount(state, deviceToken, accountId) {
@@ -653,6 +794,8 @@ async function handleAuthMe(req, res, parsedUrl) {
       plan: null,
       paid: false,
       minutesLeft: FREE_MINUTES,
+      remainingSeconds: FREE_TRIAL_SECONDS,
+      freeTrialSeconds: FREE_TRIAL_SECONDS,
     });
     return;
   }
@@ -661,7 +804,9 @@ async function handleAuthMe(req, res, parsedUrl) {
     const state = readState();
     const account = getAccountForDevice(state, deviceToken);
     const subscription = await lookupSubscriptionStatusForAccount(state, account);
-    const usage = getOrCreateDeviceUsage(state, deviceToken);
+    const remainingSeconds = subscription.active
+      ? null
+      : getFreeTrialRemainingSeconds(state, account, deviceToken);
     const paidMinutesLeft = getPaidMinutesLeft(state, account, subscription);
 
     writeState(state);
@@ -673,7 +818,11 @@ async function handleAuthMe(req, res, parsedUrl) {
       paid: subscription.active,
       subscriptionStatus: subscription.status || "none",
       plan: subscription.plan?.planId || null,
-      minutesLeft: subscription.active ? paidMinutesLeft : usage.minutesLeft,
+      minutesLeft: subscription.active ? paidMinutesLeft : displayMinutesFromSeconds(remainingSeconds),
+      remainingSeconds: subscription.active
+        ? Math.ceil(paidMinutesLeft * 60)
+        : remainingSeconds,
+      freeTrialSeconds: FREE_TRIAL_SECONDS,
     });
   } catch (error) {
     sendJson(res, 500, { error: error.message || "Failed to read auth state." });
@@ -894,15 +1043,20 @@ async function handleGoogleCallback(_req, res, parsedUrl) {
       googleSub: profile.sub || "",
     });
     linkDeviceToAccount(state, pending.deviceToken, account.id);
+    const trialSync = claimOrSyncAccountTrial(state, account, pending.deviceToken);
     delete state.googleStates[oauthState];
     writeState(state);
+
+    const trialMessage = trialSync.reducedByAccount
+      ? " This Google account already used part of the free trial, so your remaining trial time was updated."
+      : "";
 
     sendHtml(
       res,
       200,
       renderAuthCompletePage(
         "Google sign-in complete",
-        `Signed in as ${account.email}.`,
+        `Signed in as ${account.email}.${trialMessage}`,
         pending.returnUrl
       )
     );
@@ -1029,6 +1183,8 @@ async function handleSubscriptionStatus(req, res, parsedUrl) {
       email: null,
       signedIn: false,
       minutesLeft: FREE_MINUTES,
+      remainingSeconds: FREE_TRIAL_SECONDS,
+      freeTrialSeconds: FREE_TRIAL_SECONDS,
     });
     return;
   }
@@ -1037,12 +1193,19 @@ async function handleSubscriptionStatus(req, res, parsedUrl) {
     const state = readState();
     const account = getAccountForDevice(state, deviceToken);
     const status = await lookupSubscriptionStatusForAccount(state, account);
-    const usage = getOrCreateDeviceUsage(state, deviceToken);
+    const remainingSeconds = status.active
+      ? null
+      : getFreeTrialRemainingSeconds(state, account, deviceToken);
     const paidMinutesLeft = getPaidMinutesLeft(state, account, status);
+    writeState(state);
     sendJson(res, 200, {
       deviceToken,
       ...status,
-      minutesLeft: status.active ? paidMinutesLeft : usage.minutesLeft,
+      minutesLeft: status.active ? paidMinutesLeft : displayMinutesFromSeconds(remainingSeconds),
+      remainingSeconds: status.active
+        ? Math.ceil(paidMinutesLeft * 60)
+        : remainingSeconds,
+      freeTrialSeconds: FREE_TRIAL_SECONDS,
       paid: status.active,
       subscriptionStatus: status.status || "none",
     });
@@ -1130,24 +1293,27 @@ async function handleUsage(req, res, parsedUrl) {
   }
 
   const seconds = Math.max(0, Number(body.seconds) || 0);
-  const usageCost = roundUsageMinutes(seconds / 60);
+  const usageSeconds = normalizeSeconds(Math.ceil(seconds));
+  const usageCostMinutes = roundUsageMinutes(usageSeconds / 60);
 
   const state = readState();
   const account = getAccountForDevice(state, deviceToken);
   const subscription = await lookupSubscriptionStatusForAccount(state, account);
 
   if (!subscription.active) {
-    if (!deductDeviceMinutes(state, deviceToken, usageCost)) {
+    if (!deductFreeTrialSeconds(state, account, deviceToken, usageSeconds)) {
       sendJson(res, 402, { error: "not-enough-queries" });
       return;
     }
-  } else if (!deductPaidMinutes(state, account, subscription, usageCost)) {
+  } else if (!deductPaidMinutes(state, account, subscription, usageCostMinutes)) {
     sendJson(res, 402, { error: "paid-plan-limit-reached" });
     return;
   }
 
   writeState(state);
-  const usage = getOrCreateDeviceUsage(state, deviceToken);
+  const remainingSeconds = subscription.active
+    ? null
+    : getFreeTrialRemainingSeconds(state, account, deviceToken);
   const paidMinutesLeft = getPaidMinutesLeft(state, account, subscription);
 
   sendJson(res, 200, {
@@ -1155,7 +1321,11 @@ async function handleUsage(req, res, parsedUrl) {
     paid: subscription.active,
     subscriptionStatus: subscription.status || "none",
     plan: subscription.plan?.planId || null,
-    minutesLeft: subscription.active ? paidMinutesLeft : usage.minutesLeft,
+    minutesLeft: subscription.active ? paidMinutesLeft : displayMinutesFromSeconds(remainingSeconds),
+    remainingSeconds: subscription.active
+      ? Math.ceil(paidMinutesLeft * 60)
+      : remainingSeconds,
+    freeTrialSeconds: FREE_TRIAL_SECONDS,
   });
 }
 
@@ -1363,11 +1533,12 @@ async function handleTts(req, res, parsedUrl) {
   const account = getAccountForDevice(state, deviceToken);
   const subscription = await lookupSubscriptionStatusForAccount(state, account);
   const usageCost = Math.max(1, Math.ceil(text.length / CHAR_PER_MINUTE));
+  const usageSeconds = usageCost * 60;
   const shouldChargeTrial = !subscription.active;
   const shouldChargePaidPlan = subscription.active;
 
   if (shouldChargeTrial) {
-    if (!deductDeviceMinutes(state, deviceToken, usageCost)) {
+    if (!deductFreeTrialSeconds(state, account, deviceToken, usageSeconds)) {
       sendJson(res, 402, { error: "not-enough-queries" });
       return;
     }
@@ -1406,7 +1577,7 @@ async function handleTts(req, res, parsedUrl) {
     if (!upstream.ok) {
       const details = await upstream.text().catch(() => "");
       if (shouldChargeTrial) {
-        addDeviceMinutes(state, deviceToken, usageCost);
+        refundFreeTrialSeconds(state, account, deviceToken, usageSeconds);
         writeState(state);
       }
       if (shouldChargePaidPlan) {
@@ -1428,7 +1599,7 @@ async function handleTts(req, res, parsedUrl) {
     res.end(buffer);
   } catch (error) {
     if (shouldChargeTrial) {
-      addDeviceMinutes(state, deviceToken, usageCost);
+      refundFreeTrialSeconds(state, account, deviceToken, usageSeconds);
       writeState(state);
     }
     if (shouldChargePaidPlan) {

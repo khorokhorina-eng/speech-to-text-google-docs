@@ -87,6 +87,8 @@ let isAuthenticating = false;
 let authSuccessToastTimer = null;
 let authPollingTimer = null;
 let authReturnScreen = "paywall";
+let stopRequestInFlight = false;
+let stopStatePollTimer = null;
 
 async function getReturnUrlForAuth() {
   try {
@@ -286,8 +288,12 @@ function updateDictationUI() {
   docTitleEl.textContent = dictation.docTitle || "No active Google Docs tab";
 
   const isRunning = dictation.status === "listening" || dictation.status === "starting";
+  const isProcessingStop = stopRequestInFlight || dictation.message === "Transcribing your recording...";
   startBtn.disabled = trialEnded || !dictation.isDocsPage || !dictation.supported || isRunning;
-  stopBtn.disabled = !isRunning;
+  stopBtn.disabled = !isRunning || isProcessingStop;
+  stopBtn.textContent = isProcessingStop ? "Processing..." : "Stop and transcribe";
+  stopBtn.setAttribute("aria-busy", isProcessingStop ? "true" : "false");
+  stopBtn.classList.toggle("is-processing", isProcessingStop);
   startBtn.classList.toggle("hidden", isRunning);
   stopBtn.classList.toggle("hidden", !isRunning);
 
@@ -398,13 +404,53 @@ async function startDictation() {
 }
 
 async function stopDictation() {
+  if (stopRequestInFlight) {
+    return;
+  }
+  stopRequestInFlight = true;
   state.dictation.status = "starting";
   state.dictation.message = "Transcribing your recording...";
   updateUI();
   try {
-    await sendRuntimeMessage({ type: "stopDictation" });
-  } catch (_error) {}
-  await Promise.all([refreshDictationState(), loadSubscriptionStatus()]);
+    const result = await sendRuntimeMessage({ type: "stopDictation" });
+    if (result.state) {
+      state.dictation = {
+        ...state.dictation,
+        ...result.state,
+      };
+    }
+  } catch (_error) {
+    // Keep the transcribing state visible; content script will publish final status when it finishes.
+  } finally {
+    stopRequestInFlight = false;
+    updateUI();
+  }
+  pollDictationAfterStop();
+}
+
+function pollDictationAfterStop() {
+  if (stopStatePollTimer) {
+    clearInterval(stopStatePollTimer);
+    stopStatePollTimer = null;
+  }
+  let attempts = 0;
+  const maxAttempts = 70;
+  stopStatePollTimer = setInterval(() => {
+    attempts += 1;
+    void refreshDictationState().then(() => {
+      const status = state.dictation.status;
+      if (status !== "starting" && status !== "listening") {
+        clearInterval(stopStatePollTimer);
+        stopStatePollTimer = null;
+        void loadSubscriptionStatus();
+      }
+    });
+    if (attempts >= maxAttempts) {
+      clearInterval(stopStatePollTimer);
+      stopStatePollTimer = null;
+      void loadSubscriptionStatus();
+    }
+  }, 1000);
 }
 
 async function autoOpenGoogleDocsIfNeeded() {

@@ -67,6 +67,7 @@ let transcriptionQueue = Promise.resolve();
 let pendingInsertionText = "";
 let sessionAudioChunks = [];
 let recorderStopPromise = null;
+let stopFinalizationPromise = null;
 let transcriptOverlay = null;
 const insertionHistory = [];
 
@@ -1112,7 +1113,43 @@ async function startDictation() {
   }
 }
 
-async function stopDictation() {
+async function finishStoppedDictation() {
+  if (stopFinalizationPromise) {
+    return stopFinalizationPromise;
+  }
+
+  stopFinalizationPromise = (async () => {
+    if (recorderStopPromise) {
+      await withTimeout(
+        recorderStopPromise.catch(() => null),
+        10000,
+        "Stopping the microphone took too long. Please try again."
+      ).catch((error) => {
+        setStatus("error", error.message || "Unable to stop dictation.");
+      });
+    }
+    await withTimeout(
+      transcriptionQueue.catch(() => null),
+      60000,
+      "Transcription took too long. Please try a shorter recording."
+    ).catch((error) => {
+      setStatus("error", error.message || "Unable to finish transcription.");
+    });
+    try {
+      await commitUsage();
+    } catch (_error) {
+      // Keep the UX stable if the usage endpoint is unavailable.
+    }
+  })();
+
+  try {
+    await stopFinalizationPromise;
+  } finally {
+    stopFinalizationPromise = null;
+  }
+}
+
+async function stopDictation({ waitForCompletion = true } = {}) {
   desiredRunning = false;
   clearQuotaTimer();
   state.interimTranscript = "";
@@ -1139,26 +1176,11 @@ async function stopDictation() {
     }
   }
 
-  if (recorderStopPromise) {
-    await withTimeout(
-      recorderStopPromise.catch(() => null),
-      10000,
-      "Stopping the microphone took too long. Please try again."
-    ).catch((error) => {
-      setStatus("error", error.message || "Unable to stop dictation.");
-    });
-  }
-  await withTimeout(
-    transcriptionQueue.catch(() => null),
-    60000,
-    "Transcription took too long. Please try a shorter recording."
-  ).catch((error) => {
-    setStatus("error", error.message || "Unable to finish transcription.");
-  });
-  try {
-    await commitUsage();
-  } catch (_error) {
-    // Keep the UX stable if the usage endpoint is unavailable.
+  const finalization = finishStoppedDictation();
+  if (waitForCompletion) {
+    await finalization;
+  } else {
+    finalization.catch(() => null);
   }
 }
 
@@ -1215,7 +1237,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   }
 
   if (message.type === "stopDictation") {
-    stopDictation()
+    stopDictation({ waitForCompletion: false })
       .then(() => sendResponse({ ok: true, state }))
       .catch((error) => {
         lastErrorMessage = error.message || "Unable to stop dictation.";

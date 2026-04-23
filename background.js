@@ -12,6 +12,8 @@ let subscriptionCache = {
   status: "none",
   plan: null,
   minutesLeft: FREE_MINUTES,
+  remainingSeconds: FREE_MINUTES * 60,
+  freeTrialSeconds: FREE_MINUTES * 60,
   timestamp: 0,
 };
 
@@ -233,6 +235,8 @@ async function getSubscriptionStatus(forceRefresh = false) {
       status: "none",
       plan: null,
       minutesLeft: localState.minutesLeft,
+      remainingSeconds: localState.minutesLeft * 60,
+      freeTrialSeconds: FREE_MINUTES * 60,
     };
   }
 
@@ -247,19 +251,29 @@ async function getSubscriptionStatus(forceRefresh = false) {
       status: subscriptionCache.status,
       plan: subscriptionCache.plan,
       minutesLeft: subscriptionCache.minutesLeft,
+      remainingSeconds: subscriptionCache.remainingSeconds,
+      freeTrialSeconds: subscriptionCache.freeTrialSeconds,
     };
   }
 
   try {
     const data = await fetchJsonFromEndpoints("/me");
+    const serverRemainingSeconds = Number.isFinite(Number(data.remainingSeconds))
+      ? Math.max(0, Number(data.remainingSeconds))
+      : Number.isFinite(Number(data.minutesLeft))
+      ? Math.max(0, Number(data.minutesLeft)) * 60
+      : FREE_MINUTES * 60;
+    const freeTrialSeconds = Number.isFinite(Number(data.freeTrialSeconds))
+      ? Math.max(1, Number(data.freeTrialSeconds))
+      : FREE_MINUTES * 60;
     subscriptionCache = {
       deviceToken,
       active: !!data.paid,
       status: data.subscriptionStatus || "none",
       plan: data.plan ? { planId: data.plan } : null,
-      minutesLeft: Number.isFinite(Number(data.minutesLeft))
-        ? Math.max(0, Number(data.minutesLeft))
-        : FREE_MINUTES,
+      minutesLeft: serverRemainingSeconds / 60,
+      remainingSeconds: serverRemainingSeconds,
+      freeTrialSeconds,
       timestamp: now,
     };
 
@@ -269,6 +283,8 @@ async function getSubscriptionStatus(forceRefresh = false) {
       status: subscriptionCache.status,
       plan: subscriptionCache.plan,
       minutesLeft: subscriptionCache.minutesLeft,
+      remainingSeconds: subscriptionCache.remainingSeconds,
+      freeTrialSeconds: subscriptionCache.freeTrialSeconds,
     };
   } catch (_error) {
     const localState = await getLocalTrialState();
@@ -278,6 +294,8 @@ async function getSubscriptionStatus(forceRefresh = false) {
       status: "none",
       plan: null,
       minutesLeft: localState.minutesLeft,
+      remainingSeconds: localState.minutesLeft * 60,
+      freeTrialSeconds: FREE_MINUTES * 60,
       timestamp: now,
     };
     return {
@@ -286,21 +304,26 @@ async function getSubscriptionStatus(forceRefresh = false) {
       status: "none",
       plan: null,
       minutesLeft: localState.minutesLeft,
+      remainingSeconds: localState.minutesLeft * 60,
+      freeTrialSeconds: FREE_MINUTES * 60,
     };
   }
 }
 
 async function getDictationQuota() {
   const sub = await getSubscriptionStatus(false).catch(() => ({ active: false }));
-  const minutesLeft = Number.isFinite(Number(sub.minutesLeft))
-    ? Math.max(0, Number(sub.minutesLeft))
-    : FREE_MINUTES;
+  const remainingSeconds = Number.isFinite(Number(sub.remainingSeconds))
+    ? Math.max(0, Number(sub.remainingSeconds))
+    : Number.isFinite(Number(sub.minutesLeft))
+    ? Math.max(0, Number(sub.minutesLeft)) * 60
+    : FREE_MINUTES * 60;
+  const minutesLeft = remainingSeconds / 60;
 
   return {
     usedSeconds: 0,
-    limitSeconds: minutesLeft * 60,
-    remainingSeconds: minutesLeft * 60,
-    isLimited: minutesLeft <= 0,
+    limitSeconds: remainingSeconds,
+    remainingSeconds,
+    isLimited: remainingSeconds <= 0,
     isSubscribed: !!sub.active,
     subscriptionStatus: sub.status || "none",
     plan: sub.plan || null,
@@ -359,6 +382,8 @@ async function addDictationUsage(seconds) {
       status: "none",
       plan: null,
       minutesLeft: localState.minutesLeft,
+      remainingSeconds: localState.minutesLeft * 60,
+      freeTrialSeconds: FREE_MINUTES * 60,
       timestamp: Date.now(),
     };
 
@@ -382,16 +407,21 @@ async function addDictationUsage(seconds) {
     });
 
     subscriptionCache.timestamp = 0;
+    const remainingSeconds = Number.isFinite(Number(data.remainingSeconds))
+      ? Math.max(0, Number(data.remainingSeconds))
+      : Number.isFinite(Number(data.minutesLeft))
+      ? Math.max(0, Number(data.minutesLeft)) * 60
+      : 0;
 
     return {
       usedSeconds: roundedSeconds,
-      limitSeconds: Number(data.minutesLeft || 0) * 60,
-      remainingSeconds: Number(data.minutesLeft || 0) * 60,
-      isLimited: Number(data.minutesLeft || 0) <= 0,
+      limitSeconds: remainingSeconds,
+      remainingSeconds,
+      isLimited: remainingSeconds <= 0,
       isSubscribed: !!data.paid,
       subscriptionStatus: data.subscriptionStatus || "none",
       plan: data.plan ? { planId: data.plan } : null,
-      minutesLeft: Number(data.minutesLeft || 0),
+      minutesLeft: remainingSeconds / 60,
     };
   } catch (_error) {
     const localState = await consumeLocalTrialMinutes(roundedSeconds);
@@ -401,6 +431,8 @@ async function addDictationUsage(seconds) {
       status: "none",
       plan: null,
       minutesLeft: localState.minutesLeft,
+      remainingSeconds: localState.minutesLeft * 60,
+      freeTrialSeconds: FREE_MINUTES * 60,
       timestamp: Date.now(),
     };
 
