@@ -33,6 +33,8 @@ const authOverlayEl = document.getElementById("authOverlay");
 const readerScreenEl = document.getElementById("readerScreen");
 const paywallScreenEl = document.getElementById("paywallScreen");
 const backToReaderBtn = document.getElementById("backToReader");
+const ANALYTICS_SESSION_ID =
+  `${Date.now()}_${Math.random().toString(16).slice(2, 10)}`;
 
 const state = {
   dictation: {
@@ -58,6 +60,7 @@ const state = {
     active: false,
     plan: null,
     minutesLeft: 10,
+    remainingSeconds: 10 * 60,
   },
 };
 
@@ -89,6 +92,7 @@ let authPollingTimer = null;
 let authReturnScreen = "paywall";
 let stopRequestInFlight = false;
 let stopStatePollTimer = null;
+let extensionOpenedTracked = false;
 
 async function getReturnUrlForAuth() {
   try {
@@ -138,6 +142,15 @@ function sendRuntimeMessage(message) {
       resolve(response);
     });
   });
+}
+
+function trackAnalyticsEvent(name, params = {}) {
+  return sendRuntimeMessage({
+    type: "trackAnalyticsEvent",
+    name,
+    params,
+    sessionId: ANALYTICS_SESSION_ID,
+  }).catch(() => null);
 }
 
 function readStorage(keys) {
@@ -196,6 +209,18 @@ function showAuthSuccessToast() {
     authToastEl.classList.add("hidden");
     authSuccessToastTimer = null;
   }, 3200);
+}
+
+function trackExtensionOpened() {
+  if (extensionOpenedTracked) {
+    return;
+  }
+  extensionOpenedTracked = true;
+  void trackAnalyticsEvent("extension_opened", {
+    signed_in: state.auth.signedIn,
+    is_docs_page: state.dictation.isDocsPage,
+    trial_seconds_left: Number(state.subscription.remainingSeconds || 0),
+  });
 }
 
 function getPlanPresentation() {
@@ -347,12 +372,16 @@ async function loadSubscriptionStatus() {
       active: !!result.active,
       plan: result.plan || null,
       minutesLeft: Number.isFinite(Number(result.minutesLeft)) ? Number(result.minutesLeft) : 10,
+      remainingSeconds: Number.isFinite(Number(result.remainingSeconds))
+        ? Number(result.remainingSeconds)
+        : state.subscription.remainingSeconds,
     };
   } catch (_error) {
     state.subscription = {
       active: false,
       plan: null,
       minutesLeft: state.subscription.minutesLeft,
+      remainingSeconds: state.subscription.remainingSeconds,
     };
   }
 
@@ -391,6 +420,11 @@ async function refreshDictationState() {
 
 async function startDictation() {
   try {
+    void trackAnalyticsEvent("record_started", {
+      signed_in: state.auth.signedIn,
+      trial_seconds_left: Number(state.subscription.remainingSeconds || 0),
+      doc_ready: state.dictation.cursorReady,
+    });
     await sendRuntimeMessage({ type: "startDictation" });
     await refreshDictationState();
   } catch (error) {
@@ -398,7 +432,7 @@ async function startDictation() {
     state.dictation.message = error.message || "Unable to start dictation.";
     updateUI();
     if ((error.message || "").toLowerCase().includes("upgrade")) {
-      openPaywall();
+      openPaywall("record_start_blocked");
     }
   }
 }
@@ -407,6 +441,10 @@ async function stopDictation() {
   if (stopRequestInFlight) {
     return;
   }
+  void trackAnalyticsEvent("stop_and_transcribe_clicked", {
+    signed_in: state.auth.signedIn,
+    session_seconds: Number(state.dictation.sessionSeconds || 0),
+  });
   stopRequestInFlight = true;
   state.dictation.status = "starting";
   state.dictation.message = "Transcribing your recording...";
@@ -467,7 +505,12 @@ async function autoOpenGoogleDocsIfNeeded() {
   }
 }
 
-async function signInWithGoogle() {
+async function signInWithGoogle(source = "unknown") {
+  void trackAnalyticsEvent("login_started", {
+    source,
+    signed_in: state.auth.signedIn,
+    trial_seconds_left: Number(state.subscription.remainingSeconds || 0),
+  });
   authGoogleBtn.disabled = true;
   authGoogleBtn.textContent = "Opening Google...";
   setAuthenticating(true);
@@ -497,10 +540,16 @@ async function signOut() {
   }
 }
 
-function openPaywall() {
+function openPaywall(source = "unknown") {
   authReturnScreen = "paywall";
   setActiveScreen("paywall");
   closeDrawer();
+  void trackAnalyticsEvent("paywall_opened", {
+    source,
+    signed_in: state.auth.signedIn,
+    trial_seconds_left: Number(state.subscription.remainingSeconds || 0),
+    trial_exhausted: Number(state.subscription.remainingSeconds || 0) <= 0,
+  });
   void Promise.all([loadAuthState(), loadSubscriptionStatus()]).then(() => {
     if (state.subscription.active) {
       setPaywallStatus("Subscription active on this account.", true);
@@ -519,7 +568,7 @@ async function openCheckout(planId, button) {
   if (!state.auth.signedIn) {
     authReturnScreen = "paywall";
     setPaywallStatus("Sign in with Google to continue.");
-    await signInWithGoogle();
+    await signInWithGoogle(`checkout_${planId}`);
     return;
   }
 
@@ -528,6 +577,11 @@ async function openCheckout(planId, button) {
   button.textContent = "Opening checkout...";
   setPaywallStatus("Creating Stripe Checkout session...");
   try {
+    void trackAnalyticsEvent("checkout_started", {
+      plan_id: planId,
+      signed_in: state.auth.signedIn,
+      trial_seconds_left: Number(state.subscription.remainingSeconds || 0),
+    });
     const result = await sendRuntimeMessage({
       type: "createCheckoutSession",
       planId,
@@ -561,9 +615,18 @@ async function showWelcomeOnFirstLaunch() {
 
 startBtn.addEventListener("click", () => { void startDictation(); });
 stopBtn.addEventListener("click", () => { void stopDictation(); });
-upgradeBtn.addEventListener("click", () => { openPaywall(); });
-trialUpgradeBtn?.addEventListener("click", () => { openPaywall(); });
-drawerUpgradeBtn.addEventListener("click", () => { openPaywall(); });
+upgradeBtn.addEventListener("click", () => {
+  void trackAnalyticsEvent("upgrade_clicked", { source: "header_button" });
+  openPaywall("header_button");
+});
+trialUpgradeBtn?.addEventListener("click", () => {
+  void trackAnalyticsEvent("upgrade_clicked", { source: "trial_notice" });
+  openPaywall("trial_notice");
+});
+drawerUpgradeBtn.addEventListener("click", () => {
+  void trackAnalyticsEvent("upgrade_clicked", { source: "drawer_button" });
+  openPaywall("drawer_button");
+});
 contactBtn.addEventListener("click", () => { openExternalPage("/support"); });
 accountActionBtn.addEventListener("click", () => {
   if (state.auth.signedIn) {
@@ -571,9 +634,12 @@ accountActionBtn.addEventListener("click", () => {
     return;
   }
   authReturnScreen = "reader";
-  void signInWithGoogle();
+  void signInWithGoogle("account_button");
 });
-authGoogleBtn.addEventListener("click", () => { authReturnScreen = "paywall"; void signInWithGoogle(); });
+authGoogleBtn.addEventListener("click", () => {
+  authReturnScreen = "paywall";
+  void signInWithGoogle("paywall_google_button");
+});
 authSignOutBtn.addEventListener("click", () => { void signOut(); });
 continueCheckoutMonthlyBtn.addEventListener("click", () => { void openCheckout("monthly", continueCheckoutMonthlyBtn); });
 continueCheckoutAnnualBtn.addEventListener("click", () => { void openCheckout("annual", continueCheckoutAnnualBtn); });
@@ -598,6 +664,7 @@ void showWelcomeOnFirstLaunch();
 updateUI();
 void Promise.all([loadAuthState(), loadSubscriptionStatus(), refreshDictationState()]).then(() => {
   void autoOpenGoogleDocsIfNeeded();
+  trackExtensionOpened();
 });
 setInterval(() => { void refreshDictationState(); }, 1500);
 setInterval(() => { void loadSubscriptionStatus(); }, 15000);

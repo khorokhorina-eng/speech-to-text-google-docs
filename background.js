@@ -478,6 +478,23 @@ async function createCheckoutSession(planId, returnUrl) {
   };
 }
 
+async function trackAnalyticsEvent(name, params = {}, sessionId = "") {
+  const data = await fetchJsonFromEndpoints("/analytics/event", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      name,
+      params,
+      sessionId,
+    }),
+  });
+  return {
+    tracked: data?.ok !== false,
+    skipped: !!data?.skipped,
+    reason: data?.reason || null,
+  };
+}
+
 async function transcribeAudio(message = {}) {
   if (!isRemoteConfigured()) {
     throw new Error("Configure the product backend before OpenAI transcription can run.");
@@ -838,6 +855,13 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     getSubscriptionStatus(true)
       .then((result) => sendResponse({ ok: true, ...result }))
       .catch((error) => sendResponse({ ok: false, error: error.message || "Failed to refresh subscription status." }));
+    return true;
+  }
+
+  if (message.type === "trackAnalyticsEvent") {
+    trackAnalyticsEvent(message.name, message.params, message.sessionId)
+      .then((result) => sendResponse({ ok: true, ...result }))
+      .catch((error) => sendResponse({ ok: false, error: error.message || "Failed to track analytics event." }));
     return true;
   }
 
