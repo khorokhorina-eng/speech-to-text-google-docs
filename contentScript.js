@@ -24,6 +24,7 @@ const state = {
   language: "Auto",
   insertedChars: 0,
   sessionSeconds: 0,
+  recordingLimitSeconds: MAX_RECORDING_SECONDS,
   cursorReady: false,
 };
 
@@ -69,6 +70,8 @@ let sessionAudioChunks = [];
 let recorderStopPromise = null;
 let stopFinalizationPromise = null;
 let transcriptOverlay = null;
+let stopCommitPending = false;
+let pendingStopStatus = null;
 const insertionHistory = [];
 
 function withTimeout(promise, timeoutMs, message) {
@@ -94,6 +97,15 @@ function setStatus(status, message = "") {
   state.status = status;
   state.message = message;
   sendStateUpdate();
+}
+
+function setStatusAfterStop(status, message = "") {
+  if (!stopCommitPending) {
+    setStatus(status, message);
+    return;
+  }
+  pendingStopStatus = { status, message };
+  setStatus("starting", "Finishing dictation...");
 }
 
 function clearQuotaTimer() {
@@ -556,7 +568,11 @@ async function commitUsage() {
   }
 
   const elapsedSeconds = Math.max(0, Math.ceil((Date.now() - sessionStartedAtMs) / 1000));
-  if (!elapsedSeconds) {
+  const cappedSeconds = Math.min(
+    Math.max(1, Number(state.recordingLimitSeconds) || MAX_RECORDING_SECONDS),
+    elapsedSeconds
+  );
+  if (!cappedSeconds) {
     sessionStartedAtMs = 0;
     state.sessionSeconds = 0;
     clearSessionSecondsTimer();
@@ -564,7 +580,7 @@ async function commitUsage() {
   }
 
   try {
-    const result = await sendRuntimeMessage({ type: "addDictationUsage", seconds: elapsedSeconds });
+    const result = await sendRuntimeMessage({ type: "addDictationUsage", seconds: cappedSeconds });
     usageCommittedForSession = true;
     sessionStartedAtMs = 0;
     state.sessionSeconds = 0;
@@ -891,7 +907,7 @@ async function flushPendingInsertion() {
 async function handleTranscriptionText(text) {
   const normalizedTranscript = normalizeTranscriptChunk(text);
   if (!normalizedTranscript) {
-    setStatus("idle", "No speech detected. Try again.");
+    setStatusAfterStop("idle", "No speech detected. Try again.");
     return;
   }
 
@@ -908,7 +924,7 @@ async function handleTranscriptionText(text) {
   if (!inserted) {
     enqueuePendingInsertion(normalizedTranscript);
     showTranscriptOverlay(normalizedTranscript);
-    setStatus(
+    setStatusAfterStop(
       desiredRunning && mediaRecorder ? "listening" : "idle",
       "Transcript ready. Copy it from the page card and paste it into Google Docs."
     );
@@ -919,8 +935,7 @@ async function handleTranscriptionText(text) {
   state.insertedChars += normalizedTranscript.length;
   state.interimTranscript = "";
   insertionHistory.push(normalizedTranscript);
-  setStatus("idle", "Text inserted into Google Docs.");
-  sendStateUpdate();
+  setStatusAfterStop("idle", "Text inserted into Google Docs.");
 }
 
 function queueTranscription(blob) {
@@ -944,13 +959,12 @@ function queueTranscription(blob) {
     .catch((error) => {
       lastErrorMessage = error.message || "OpenAI transcription failed.";
       state.interimTranscript = "";
-      setStatus(
+      setStatusAfterStop(
         desiredRunning && mediaRecorder ? "listening" : "error",
         desiredRunning && mediaRecorder
           ? `Transcription issue: ${lastErrorMessage}`
           : lastErrorMessage
       );
-      sendStateUpdate();
     });
 
   return transcriptionQueue;
@@ -1047,6 +1061,8 @@ async function startDictation() {
 
   markSessionStart();
   const recordingSecondsLimit = Math.min(Number(quota.remainingSeconds), MAX_RECORDING_SECONDS);
+  state.recordingLimitSeconds = Math.max(1, recordingSecondsLimit);
+  sendStateUpdate();
 
   quotaTimer = setTimeout(async () => {
     desiredRunning = false;
@@ -1088,7 +1104,15 @@ async function startDictation() {
       setStatus("error", error.message || "Unable to finish transcription.");
     });
     await commitUsage().catch(() => null);
-    setStatus("error", "2-minute recording limit reached. Transcribe and start a new recording.");
+    state.recordingLimitSeconds = MAX_RECORDING_SECONDS;
+    const trialWasExhausted =
+      !quota.isSubscribed && Number(quota.remainingSeconds) <= MAX_RECORDING_SECONDS;
+    setStatus(
+      "error",
+      trialWasExhausted
+        ? "Your free trial has ended. Upgrade to continue dictation."
+        : "Recording limit reached. Transcribe and start a new recording."
+    );
   }, recordingSecondsLimit * 1000);
 
   setStatus("starting", "Starting AI dictation...");
@@ -1140,6 +1164,16 @@ async function finishStoppedDictation() {
     } catch (_error) {
       // Keep the UX stable if the usage endpoint is unavailable.
     }
+    state.recordingLimitSeconds = MAX_RECORDING_SECONDS;
+
+    stopCommitPending = false;
+    if (pendingStopStatus) {
+      const { status, message } = pendingStopStatus;
+      pendingStopStatus = null;
+      setStatus(status, message);
+    } else if (state.status === "starting") {
+      setStatus("idle", "Dictation finished.");
+    }
   })();
 
   try {
@@ -1151,6 +1185,8 @@ async function finishStoppedDictation() {
 
 async function stopDictation({ waitForCompletion = true } = {}) {
   desiredRunning = false;
+  stopCommitPending = true;
+  pendingStopStatus = null;
   clearQuotaTimer();
   state.interimTranscript = "";
   setStatus("starting", "Transcribing your recording...");

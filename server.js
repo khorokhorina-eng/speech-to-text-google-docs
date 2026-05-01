@@ -45,7 +45,7 @@ const OPENAI_TTS_MODEL = process.env.OPENAI_TTS_MODEL || "gpt-4o-mini-tts";
 const OPENAI_TTS_VOICE = process.env.OPENAI_TTS_VOICE || "alloy";
 const OPENAI_TRANSCRIBE_MODEL =
   process.env.OPENAI_TRANSCRIBE_MODEL || "gpt-4o-mini-transcribe";
-const FREE_MINUTES = Math.max(1, Number(process.env.FREE_MINUTES || 10));
+const FREE_MINUTES = Math.max(1, Number(process.env.FREE_MINUTES || 2));
 const FREE_TRIAL_SECONDS = Math.max(1, Math.floor(FREE_MINUTES * 60));
 const CHAR_PER_MINUTE = Math.max(1, Number(process.env.CHAR_PER_MINUTE || 900));
 const PUBLIC_BASE_URL = (process.env.PUBLIC_BASE_URL || "").replace(/\/+$/, "");
@@ -1210,6 +1210,11 @@ async function handleAuthLogout(req, res, parsedUrl) {
 
   const deviceToken = getDeviceToken(req, parsedUrl, body);
   const state = readState();
+  const account = getAccountForDevice(state, deviceToken);
+  if (account) {
+    claimOrSyncAccountTrial(state, account, deviceToken);
+    syncDeviceUsageToAccountTrial(state, deviceToken, account);
+  }
   unlinkDevice(state, deviceToken);
   writeState(state);
   sendJson(res, 200, { ok: true });

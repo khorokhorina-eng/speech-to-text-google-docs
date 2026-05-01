@@ -1,6 +1,7 @@
 const REMOTE_API_BASE_URL = "https://voicetext.world";
 const BILLING_ENDPOINTS = [REMOTE_API_BASE_URL];
-const FREE_MINUTES = 10;
+const FREE_MINUTES = 2;
+const UNINSTALL_URL = `${REMOTE_API_BASE_URL}/uninstall.html`;
 const DEVICE_TOKEN_KEY = "deviceToken";
 const AUTH_SESSION_KEY = "authSession";
 const LOCAL_TRIAL_STATE_KEY = "localTrialState";
@@ -32,6 +33,8 @@ async function configureSidePanelBehavior() {
 }
 
 void configureSidePanelBehavior();
+
+chrome.runtime.setUninstallURL?.(UNINSTALL_URL).catch(() => {});
 
 function isRemoteConfigured() {
   return Boolean(REMOTE_API_BASE_URL) && !/your-domain\.com/i.test(REMOTE_API_BASE_URL);
@@ -180,6 +183,7 @@ async function signOut() {
   const deviceToken = await getOrCreateDeviceToken();
   if (!isRemoteConfigured()) {
     await writeStorage({ [AUTH_SESSION_KEY]: null });
+    subscriptionCache.timestamp = 0;
     return {
       signedIn: false,
       email: "",
@@ -200,6 +204,7 @@ async function signOut() {
   }
 
   await writeStorage({ [AUTH_SESSION_KEY]: null });
+  subscriptionCache.timestamp = 0;
   return {
     signedIn: false,
     email: "",
@@ -351,10 +356,14 @@ async function getLocalTrialState() {
     return initial;
   }
 
-  return {
-    minutesLeft: roundMinutes(raw.minutesLeft),
+  const normalized = {
+    minutesLeft: Math.min(FREE_MINUTES, roundMinutes(raw.minutesLeft)),
     updatedAt: Number(raw.updatedAt) || Date.now(),
   };
+  if (normalized.minutesLeft !== Number(raw.minutesLeft)) {
+    await writeStorage({ [LOCAL_TRIAL_STATE_KEY]: normalized });
+  }
+  return normalized;
 }
 
 async function consumeLocalTrialMinutes(seconds) {
