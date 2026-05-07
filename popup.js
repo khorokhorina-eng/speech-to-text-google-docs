@@ -2,8 +2,7 @@ const statusEl = document.getElementById("status");
 const hintEl = document.getElementById("hint");
 const docTitleEl = document.getElementById("docTitle");
 const quotaEl = document.getElementById("quota");
-const countdownEl = document.getElementById("countdown");
-const countdownFillEl = document.getElementById("countdownFill");
+const recordingTipsEl = document.getElementById("recordingTips");
 const startBtn = document.getElementById("start");
 const stopBtn = document.getElementById("stop");
 const upgradeBtn = document.getElementById("upgrade");
@@ -33,9 +32,9 @@ const authOverlayEl = document.getElementById("authOverlay");
 const readerScreenEl = document.getElementById("readerScreen");
 const paywallScreenEl = document.getElementById("paywallScreen");
 const backToReaderBtn = document.getElementById("backToReader");
-const ANALYTICS_SESSION_ID =
-  `${Date.now()}_${Math.random().toString(16).slice(2, 10)}`;
-const MAX_RECORDING_SECONDS = 120;
+
+const ANALYTICS_SESSION_ID = `${Date.now()}_${Math.random().toString(16).slice(2, 10)}`;
+const FREE_TRIAL_SESSIONS = 15;
 
 const state = {
   dictation: {
@@ -50,7 +49,6 @@ const state = {
     language: "Auto",
     insertedChars: 0,
     sessionSeconds: 0,
-    recordingLimitSeconds: MAX_RECORDING_SECONDS,
     cursorReady: false,
   },
   auth: {
@@ -60,9 +58,10 @@ const state = {
   },
   subscription: {
     active: false,
+    status: "none",
     plan: null,
-    minutesLeft: 2,
-    remainingSeconds: 2 * 60,
+    sessionsLeft: FREE_TRIAL_SESSIONS,
+    freeTrialSessions: FREE_TRIAL_SESSIONS,
   },
 };
 
@@ -95,54 +94,6 @@ let stopRequestInFlight = false;
 let stopStatePollTimer = null;
 let extensionOpenedTracked = false;
 const DOCS_AUTO_OPEN_COOLDOWN_MS = 5000;
-
-async function getReturnUrlForAuth() {
-  try {
-    const tabs = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
-    const url = tabs?.[0]?.url || "";
-    if (typeof url === "string" && url.startsWith("https://")) {
-      return url;
-    }
-  } catch (_error) {
-    // Fall back to extension page below.
-  }
-  return chrome.runtime.getURL("paywall.html");
-}
-
-function getPlanLabel(plan) {
-  const planId = plan?.planId || "";
-  if (planId === "annual") return "Annual plan";
-  if (planId === "monthly") return "Monthly plan";
-  return "Paid plan";
-}
-
-function formatMinutesForDisplay(value) {
-  const numeric = Number(value);
-  if (!Number.isFinite(numeric) || numeric <= 0) return 0;
-  return Math.max(0, Math.ceil(numeric));
-}
-
-function formatTrialSeconds(value) {
-  const numeric = Number(value);
-  if (!Number.isFinite(numeric) || numeric <= 0) {
-    return "0 sec";
-  }
-  return `${Math.max(0, Math.ceil(numeric))} sec`;
-}
-
-function isTrialEndedState() {
-  const remainingTrialSeconds = Number.isFinite(Number(state.subscription.remainingSeconds))
-    ? Math.max(0, Number(state.subscription.remainingSeconds))
-    : 0;
-  const trialMessage = String(state.dictation.message || "").toLowerCase();
-  return (
-    !state.subscription.active &&
-    (remainingTrialSeconds <= 0 ||
-      trialMessage.includes("free trial has ended") ||
-      trialMessage.includes("upgrade to continue dictation") ||
-      trialMessage.includes("free trial used"))
-  );
-}
 
 function sendRuntimeMessage(message) {
   return new Promise((resolve, reject) => {
@@ -179,6 +130,48 @@ function writeStorage(payload) {
   return new Promise((resolve) => {
     chrome.storage.local.set(payload, () => resolve());
   });
+}
+
+async function getReturnUrlForAuth() {
+  try {
+    const tabs = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
+    const url = tabs?.[0]?.url || "";
+    if (typeof url === "string" && url.startsWith("https://")) {
+      return url;
+    }
+  } catch (_error) {
+    // Fall through.
+  }
+  return chrome.runtime.getURL("paywall.html");
+}
+
+function getPlanLabel(plan) {
+  const planId = plan?.planId || "";
+  if (planId === "annual") return "Annual plan";
+  if (planId === "monthly") return "Monthly plan";
+  return "Premium plan";
+}
+
+function formatSessions(value) {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric) || numeric <= 0) {
+    return "0 sessions";
+  }
+  const rounded = Math.max(0, Math.floor(numeric));
+  return `${rounded} ${rounded === 1 ? "session" : "sessions"}`;
+}
+
+function isTrialEndedState() {
+  const sessionsLeft = Number.isFinite(Number(state.subscription.sessionsLeft))
+    ? Math.max(0, Math.floor(Number(state.subscription.sessionsLeft)))
+    : 0;
+  const trialMessage = String(state.dictation.message || "").toLowerCase();
+  return (
+    !state.subscription.active &&
+    (sessionsLeft <= 0 ||
+      trialMessage.includes("free trial ended") ||
+      trialMessage.includes("upgrade to continue dictation"))
+  );
 }
 
 function setActiveScreen(screen) {
@@ -235,25 +228,23 @@ function trackExtensionOpened() {
   void trackAnalyticsEvent("extension_opened", {
     signed_in: state.auth.signedIn,
     is_docs_page: state.dictation.isDocsPage,
-    trial_seconds_left: Number(state.subscription.remainingSeconds || 0),
+    trial_sessions_left: Number(state.subscription.sessionsLeft || 0),
   });
 }
 
 function getPlanPresentation() {
   if (state.subscription.active) {
-    const activePlanId = state.subscription?.plan?.planId || "";
-    const activePlanMeta = PLAN_META[activePlanId] || {};
     return {
-      name: activePlanMeta.label || "Paid plan",
-      meta: `${formatMinutesForDisplay(state.subscription.minutesLeft)} minutes left in your plan.`,
+      name: getPlanLabel(state.subscription.plan),
+      meta: "Premium dictation is active on this account.",
     };
   }
 
   return {
     name: "Free Trial",
     meta:
-      Number(state.subscription.remainingSeconds) > 0
-        ? `${formatTrialSeconds(state.subscription.remainingSeconds)} remaining in your free trial.`
+      Number(state.subscription.sessionsLeft) > 0
+        ? `${formatSessions(state.subscription.sessionsLeft)} remaining in your free trial.`
         : "Upgrade to unlock premium dictation.",
   };
 }
@@ -307,14 +298,14 @@ function updateAuthUI() {
 }
 
 function updateQuotaUI() {
-  const minutesLeft = formatMinutesForDisplay(state.subscription.minutesLeft);
   if (state.subscription.active) {
-    quotaEl.textContent = `${getPlanLabel(state.subscription.plan)} · ${minutesLeft} minutes left`;
+    quotaEl.textContent = `${getPlanLabel(state.subscription.plan)} · Premium active`;
     return;
   }
+
   quotaEl.textContent = isTrialEndedState()
-    ? "0 sec left in trial"
-    : `${formatTrialSeconds(state.subscription.remainingSeconds)} left in trial`;
+    ? "0 sessions left in trial"
+    : `${formatSessions(state.subscription.sessionsLeft)} left in trial`;
 }
 
 function updateDictationUI() {
@@ -330,27 +321,14 @@ function updateDictationUI() {
   docTitleEl.textContent = dictation.docTitle || "No active Google Docs tab";
 
   const isRunning = dictation.status === "listening" || dictation.status === "starting";
-  const isProcessingStop = stopRequestInFlight || dictation.message === "Transcribing your recording...";
   startBtn.disabled = trialEnded || !dictation.isDocsPage || !dictation.supported || isRunning;
-  stopBtn.disabled = !isRunning || isProcessingStop;
-  stopBtn.textContent = isProcessingStop ? "Processing..." : "Stop and transcribe";
-  stopBtn.setAttribute("aria-busy", isProcessingStop ? "true" : "false");
-  stopBtn.classList.toggle("is-processing", isProcessingStop);
+  stopBtn.disabled = !isRunning || stopRequestInFlight;
+  stopBtn.textContent = stopRequestInFlight ? "Stopping..." : "Stop dictation";
+  stopBtn.setAttribute("aria-busy", stopRequestInFlight ? "true" : "false");
+  stopBtn.classList.toggle("is-processing", stopRequestInFlight);
   startBtn.classList.toggle("hidden", isRunning);
   stopBtn.classList.toggle("hidden", !isRunning);
-
-  if (isRunning) {
-    const elapsedSeconds = Math.max(0, Number(dictation.sessionSeconds) || 0);
-    const recordingLimitSeconds = Number.isFinite(Number(dictation.recordingLimitSeconds))
-      ? Math.max(1, Number(dictation.recordingLimitSeconds))
-      : MAX_RECORDING_SECONDS;
-    const progressRatio = recordingLimitSeconds > 0 ? elapsedSeconds / recordingLimitSeconds : 0;
-    countdownFillEl.style.width = `${Math.max(0, Math.min(1, progressRatio)) * 100}%`;
-    countdownEl.classList.remove("hidden");
-  } else {
-    countdownFillEl.style.width = "0%";
-    countdownEl.classList.add("hidden");
-  }
+  recordingTipsEl?.classList.toggle("hidden", !isRunning);
 
   trialEndedNoticeEl.classList.toggle("hidden", !trialEnded);
 
@@ -360,7 +338,7 @@ function updateDictationUI() {
     startBtn.disabled = true;
     hintEl.textContent = "Open a Google Docs document first.";
   } else if (dictation.status === "idle" && !dictation.cursorReady) {
-    hintEl.textContent = "Click inside Google Docs, record your voice, and the transcript will appear after recording ends.";
+    hintEl.textContent = "Click inside Google Docs first, then start dictation.";
   }
 }
 
@@ -390,24 +368,28 @@ async function loadSubscriptionStatus() {
     const result = await sendRuntimeMessage({ type: "refreshSubscriptionStatus" });
     state.subscription = {
       active: !!result.active,
+      status: result.status || "none",
       plan: result.plan || null,
-      minutesLeft: Number.isFinite(Number(result.minutesLeft)) ? Number(result.minutesLeft) : 2,
-      remainingSeconds: Number.isFinite(Number(result.remainingSeconds))
-        ? Number(result.remainingSeconds)
-        : state.subscription.remainingSeconds,
+      sessionsLeft: Number.isFinite(Number(result.sessionsLeft))
+        ? Number(result.sessionsLeft)
+        : state.subscription.sessionsLeft,
+      freeTrialSessions: Number.isFinite(Number(result.freeTrialSessions))
+        ? Number(result.freeTrialSessions)
+        : FREE_TRIAL_SESSIONS,
     };
   } catch (_error) {
     state.subscription = {
       active: false,
+      status: "none",
       plan: null,
-      minutesLeft: state.subscription.minutesLeft,
-      remainingSeconds: state.subscription.remainingSeconds,
+      sessionsLeft: state.subscription.sessionsLeft,
+      freeTrialSessions: state.subscription.freeTrialSessions,
     };
   }
 
   if (activeScreen === "paywall") {
     if (state.subscription.active) {
-      setPaywallStatus(`Subscription active on this account.`, true);
+      setPaywallStatus("Subscription active on this account.", true);
     } else {
       setPaywallStatus(
         state.auth.signedIn
@@ -442,10 +424,21 @@ async function startDictation() {
   try {
     void trackAnalyticsEvent("record_started", {
       signed_in: state.auth.signedIn,
-      trial_seconds_left: Number(state.subscription.remainingSeconds || 0),
+      trial_sessions_left: Number(state.subscription.sessionsLeft || 0),
       doc_ready: state.dictation.cursorReady,
     });
-    await sendRuntimeMessage({ type: "startDictation" });
+    const result = await sendRuntimeMessage({ type: "startDictation" });
+    if (result?.quota) {
+      state.subscription = {
+        ...state.subscription,
+        active: !!result.quota.isSubscribed,
+        status: result.quota.subscriptionStatus || state.subscription.status,
+        plan: result.quota.plan || state.subscription.plan,
+        sessionsLeft: Number.isFinite(Number(result.quota.sessionsLeft))
+          ? Number(result.quota.sessionsLeft)
+          : state.subscription.sessionsLeft,
+      };
+    }
     await refreshDictationState();
   } catch (error) {
     state.dictation.status = "error";
@@ -467,7 +460,7 @@ async function stopDictation() {
   });
   stopRequestInFlight = true;
   state.dictation.status = "starting";
-  state.dictation.message = "Transcribing your recording...";
+  state.dictation.message = "Stopping dictation...";
   updateUI();
   try {
     const result = await sendRuntimeMessage({ type: "stopDictation" });
@@ -477,8 +470,6 @@ async function stopDictation() {
         ...result.state,
       };
     }
-  } catch (_error) {
-    // Keep the transcribing state visible; content script will publish final status when it finishes.
   } finally {
     stopRequestInFlight = false;
     updateUI();
@@ -492,7 +483,7 @@ function pollDictationAfterStop() {
     stopStatePollTimer = null;
   }
   let attempts = 0;
-  const maxAttempts = 70;
+  const maxAttempts = 20;
   stopStatePollTimer = setInterval(() => {
     attempts += 1;
     void refreshDictationState().then(() => {
@@ -508,7 +499,7 @@ function pollDictationAfterStop() {
       stopStatePollTimer = null;
       void loadSubscriptionStatus();
     }
-  }, 1000);
+  }, 500);
 }
 
 async function autoOpenGoogleDocsIfNeeded() {
@@ -532,7 +523,7 @@ async function signInWithGoogle(source = "unknown") {
   void trackAnalyticsEvent("login_started", {
     source,
     signed_in: state.auth.signedIn,
-    trial_seconds_left: Number(state.subscription.remainingSeconds || 0),
+    trial_sessions_left: Number(state.subscription.sessionsLeft || 0),
   });
   authGoogleBtn.disabled = true;
   authGoogleBtn.textContent = "Opening Google...";
@@ -570,8 +561,8 @@ function openPaywall(source = "unknown") {
   void trackAnalyticsEvent("paywall_opened", {
     source,
     signed_in: state.auth.signedIn,
-    trial_seconds_left: Number(state.subscription.remainingSeconds || 0),
-    trial_exhausted: Number(state.subscription.remainingSeconds || 0) <= 0,
+    trial_sessions_left: Number(state.subscription.sessionsLeft || 0),
+    trial_exhausted: Number(state.subscription.sessionsLeft || 0) <= 0,
   });
   void Promise.all([loadAuthState(), loadSubscriptionStatus()]).then(() => {
     if (state.subscription.active) {
@@ -603,7 +594,7 @@ async function openCheckout(planId, button) {
     void trackAnalyticsEvent("checkout_started", {
       plan_id: planId,
       signed_in: state.auth.signedIn,
-      trial_seconds_left: Number(state.subscription.remainingSeconds || 0),
+      trial_sessions_left: Number(state.subscription.sessionsLeft || 0),
     });
     const result = await sendRuntimeMessage({
       type: "createCheckoutSession",
@@ -644,8 +635,12 @@ function initializePopup() {
   }
   popupInitialized = true;
 
-  startBtn.addEventListener("click", () => { void startDictation(); });
-  stopBtn.addEventListener("click", () => { void stopDictation(); });
+  startBtn.addEventListener("click", () => {
+    void startDictation();
+  });
+  stopBtn.addEventListener("click", () => {
+    void stopDictation();
+  });
   upgradeBtn.addEventListener("click", () => {
     void trackAnalyticsEvent("upgrade_clicked", { source: "header_button" });
     openPaywall("header_button");
@@ -658,7 +653,9 @@ function initializePopup() {
     void trackAnalyticsEvent("upgrade_clicked", { source: "drawer_button" });
     openPaywall("drawer_button");
   });
-  contactBtn.addEventListener("click", () => { openExternalPage("/support"); });
+  contactBtn.addEventListener("click", () => {
+    openExternalPage("/support");
+  });
   accountActionBtn.addEventListener("click", () => {
     if (state.auth.signedIn) {
       void signOut();
@@ -671,13 +668,27 @@ function initializePopup() {
     authReturnScreen = "paywall";
     void signInWithGoogle("paywall_google_button");
   });
-  authSignOutBtn.addEventListener("click", () => { void signOut(); });
-  continueCheckoutMonthlyBtn.addEventListener("click", () => { void openCheckout("monthly", continueCheckoutMonthlyBtn); });
-  continueCheckoutAnnualBtn.addEventListener("click", () => { void openCheckout("annual", continueCheckoutAnnualBtn); });
-  profileTriggerBtn.addEventListener("click", () => { openDrawer(); });
-  closeDrawerBtn.addEventListener("click", () => { closeDrawer(); });
-  drawerBackdropEl.addEventListener("click", () => { closeDrawer(); });
-  backToReaderBtn.addEventListener("click", () => { setActiveScreen("reader"); });
+  authSignOutBtn.addEventListener("click", () => {
+    void signOut();
+  });
+  continueCheckoutMonthlyBtn.addEventListener("click", () => {
+    void openCheckout("monthly", continueCheckoutMonthlyBtn);
+  });
+  continueCheckoutAnnualBtn.addEventListener("click", () => {
+    void openCheckout("annual", continueCheckoutAnnualBtn);
+  });
+  profileTriggerBtn.addEventListener("click", () => {
+    openDrawer();
+  });
+  closeDrawerBtn.addEventListener("click", () => {
+    closeDrawer();
+  });
+  drawerBackdropEl.addEventListener("click", () => {
+    closeDrawer();
+  });
+  backToReaderBtn.addEventListener("click", () => {
+    setActiveScreen("reader");
+  });
 
   document.addEventListener("keydown", (event) => {
     if (event.key === "Escape") {
@@ -712,8 +723,12 @@ function initializePopup() {
     void autoOpenGoogleDocsIfNeeded();
     trackExtensionOpened();
   });
-  setInterval(() => { void refreshDictationState(); }, 1500);
-  setInterval(() => { void loadSubscriptionStatus(); }, 15000);
+  setInterval(() => {
+    void refreshDictationState();
+  }, 1500);
+  setInterval(() => {
+    void loadSubscriptionStatus();
+  }, 15000);
 }
 
 if (document.readyState === "loading") {

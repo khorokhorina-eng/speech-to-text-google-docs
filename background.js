@@ -1,6 +1,6 @@
 const REMOTE_API_BASE_URL = "https://voicetext.world";
 const BILLING_ENDPOINTS = [REMOTE_API_BASE_URL];
-const FREE_MINUTES = 2;
+const FREE_TRIAL_SESSIONS = 15;
 const UNINSTALL_URL = `${REMOTE_API_BASE_URL}/uninstall.html`;
 const DEVICE_TOKEN_KEY = "deviceToken";
 const AUTH_SESSION_KEY = "authSession";
@@ -12,9 +12,8 @@ let subscriptionCache = {
   active: false,
   status: "none",
   plan: null,
-  minutesLeft: FREE_MINUTES,
-  remainingSeconds: FREE_MINUTES * 60,
-  freeTrialSeconds: FREE_MINUTES * 60,
+  sessionsLeft: FREE_TRIAL_SESSIONS,
+  freeTrialSessions: FREE_TRIAL_SESSIONS,
   timestamp: 0,
 };
 
@@ -28,7 +27,7 @@ async function configureSidePanelBehavior() {
   try {
     await chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: true });
   } catch (_error) {
-    // Best-effort; keep extension usable even if Chrome rejects the call.
+    // Best effort only.
   }
 }
 
@@ -126,10 +125,7 @@ async function fetchJsonFromEndpoints(pathname, options = {}) {
 
       return data;
     } catch (error) {
-      lastError =
-        error?.name === "AbortError"
-          ? new Error("Transcription timed out. Please try a shorter recording.")
-          : error;
+      lastError = error;
     }
   }
 
@@ -181,26 +177,16 @@ async function getAuthState() {
 
 async function signOut() {
   const deviceToken = await getOrCreateDeviceToken();
-  if (!isRemoteConfigured()) {
-    await writeStorage({ [AUTH_SESSION_KEY]: null });
-    subscriptionCache.timestamp = 0;
-    return {
-      signedIn: false,
-      email: "",
-      method: null,
-      signedInAt: null,
-      deviceToken,
-    };
-  }
-
-  try {
-    await fetchJsonFromEndpoints("/auth/logout", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ device_token: deviceToken }),
-    });
-  } catch (_error) {
-    // Clear local auth state even when the backend is unavailable.
+  if (isRemoteConfigured()) {
+    try {
+      await fetchJsonFromEndpoints("/auth/logout", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ device_token: deviceToken }),
+      });
+    } catch (_error) {
+      // Clear local auth state even when backend logout is unavailable.
+    }
   }
 
   await writeStorage({ [AUTH_SESSION_KEY]: null });
@@ -228,22 +214,53 @@ async function startGoogleSignIn(returnUrl) {
   return { started: true, deviceToken };
 }
 
+function getDefaultLocalTrialState() {
+  return {
+    sessionsLeft: FREE_TRIAL_SESSIONS,
+    updatedAt: Date.now(),
+  };
+}
+
+async function getLocalTrialState() {
+  const result = await readStorage([LOCAL_TRIAL_STATE_KEY]);
+  const raw = result?.[LOCAL_TRIAL_STATE_KEY];
+  if (!raw || !Number.isFinite(Number(raw.sessionsLeft))) {
+    const initial = getDefaultLocalTrialState();
+    await writeStorage({ [LOCAL_TRIAL_STATE_KEY]: initial });
+    return initial;
+  }
+
+  const normalized = {
+    sessionsLeft: Math.max(0, Math.min(FREE_TRIAL_SESSIONS, Math.floor(Number(raw.sessionsLeft)))),
+    updatedAt: Number(raw.updatedAt) || Date.now(),
+  };
+  if (
+    normalized.sessionsLeft !== Number(raw.sessionsLeft) ||
+    normalized.updatedAt !== Number(raw.updatedAt)
+  ) {
+    await writeStorage({ [LOCAL_TRIAL_STATE_KEY]: normalized });
+  }
+  return normalized;
+}
+
+async function consumeLocalTrialSession() {
+  const current = await getLocalTrialState();
+  if (current.sessionsLeft <= 0) {
+    throw new Error("Free trial ended. Upgrade to continue dictation.");
+  }
+
+  const next = {
+    sessionsLeft: Math.max(0, current.sessionsLeft - 1),
+    updatedAt: Date.now(),
+  };
+  await writeStorage({ [LOCAL_TRIAL_STATE_KEY]: next });
+  return next;
+}
+
 async function getSubscriptionStatus(forceRefresh = false) {
   const deviceToken = await getOrCreateDeviceToken();
   const now = Date.now();
-
-  if (!isRemoteConfigured()) {
-    const localState = await getLocalTrialState();
-    return {
-      deviceToken,
-      active: false,
-      status: "none",
-      plan: null,
-      minutesLeft: localState.minutesLeft,
-      remainingSeconds: localState.minutesLeft * 60,
-      freeTrialSeconds: FREE_MINUTES * 60,
-    };
-  }
+  const localState = await getLocalTrialState();
 
   if (
     !forceRefresh &&
@@ -255,30 +272,40 @@ async function getSubscriptionStatus(forceRefresh = false) {
       active: subscriptionCache.active,
       status: subscriptionCache.status,
       plan: subscriptionCache.plan,
-      minutesLeft: subscriptionCache.minutesLeft,
-      remainingSeconds: subscriptionCache.remainingSeconds,
-      freeTrialSeconds: subscriptionCache.freeTrialSeconds,
+      sessionsLeft: subscriptionCache.active ? null : localState.sessionsLeft,
+      freeTrialSessions: FREE_TRIAL_SESSIONS,
+    };
+  }
+
+  if (!isRemoteConfigured()) {
+    subscriptionCache = {
+      deviceToken,
+      active: false,
+      status: "none",
+      plan: null,
+      sessionsLeft: localState.sessionsLeft,
+      freeTrialSessions: FREE_TRIAL_SESSIONS,
+      timestamp: now,
+    };
+    return {
+      deviceToken,
+      active: false,
+      status: "none",
+      plan: null,
+      sessionsLeft: localState.sessionsLeft,
+      freeTrialSessions: FREE_TRIAL_SESSIONS,
     };
   }
 
   try {
     const data = await fetchJsonFromEndpoints("/me");
-    const serverRemainingSeconds = Number.isFinite(Number(data.remainingSeconds))
-      ? Math.max(0, Number(data.remainingSeconds))
-      : Number.isFinite(Number(data.minutesLeft))
-      ? Math.max(0, Number(data.minutesLeft)) * 60
-      : FREE_MINUTES * 60;
-    const freeTrialSeconds = Number.isFinite(Number(data.freeTrialSeconds))
-      ? Math.max(1, Number(data.freeTrialSeconds))
-      : FREE_MINUTES * 60;
     subscriptionCache = {
       deviceToken,
       active: !!data.paid,
       status: data.subscriptionStatus || "none",
       plan: data.plan ? { planId: data.plan } : null,
-      minutesLeft: serverRemainingSeconds / 60,
-      remainingSeconds: serverRemainingSeconds,
-      freeTrialSeconds,
+      sessionsLeft: localState.sessionsLeft,
+      freeTrialSessions: FREE_TRIAL_SESSIONS,
       timestamp: now,
     };
 
@@ -287,20 +314,17 @@ async function getSubscriptionStatus(forceRefresh = false) {
       active: subscriptionCache.active,
       status: subscriptionCache.status,
       plan: subscriptionCache.plan,
-      minutesLeft: subscriptionCache.minutesLeft,
-      remainingSeconds: subscriptionCache.remainingSeconds,
-      freeTrialSeconds: subscriptionCache.freeTrialSeconds,
+      sessionsLeft: subscriptionCache.active ? null : localState.sessionsLeft,
+      freeTrialSessions: FREE_TRIAL_SESSIONS,
     };
   } catch (_error) {
-    const localState = await getLocalTrialState();
     subscriptionCache = {
       deviceToken,
       active: false,
       status: "none",
       plan: null,
-      minutesLeft: localState.minutesLeft,
-      remainingSeconds: localState.minutesLeft * 60,
-      freeTrialSeconds: FREE_MINUTES * 60,
+      sessionsLeft: localState.sessionsLeft,
+      freeTrialSessions: FREE_TRIAL_SESSIONS,
       timestamp: now,
     };
     return {
@@ -308,154 +332,64 @@ async function getSubscriptionStatus(forceRefresh = false) {
       active: false,
       status: "none",
       plan: null,
-      minutesLeft: localState.minutesLeft,
-      remainingSeconds: localState.minutesLeft * 60,
-      freeTrialSeconds: FREE_MINUTES * 60,
+      sessionsLeft: localState.sessionsLeft,
+      freeTrialSessions: FREE_TRIAL_SESSIONS,
     };
   }
 }
 
 async function getDictationQuota() {
-  const sub = await getSubscriptionStatus(false).catch(() => ({ active: false }));
-  const remainingSeconds = Number.isFinite(Number(sub.remainingSeconds))
-    ? Math.max(0, Number(sub.remainingSeconds))
-    : Number.isFinite(Number(sub.minutesLeft))
-    ? Math.max(0, Number(sub.minutesLeft)) * 60
-    : FREE_MINUTES * 60;
-  const minutesLeft = remainingSeconds / 60;
+  const sub = await getSubscriptionStatus(false).catch(() => ({
+    active: false,
+    sessionsLeft: FREE_TRIAL_SESSIONS,
+  }));
+
+  const sessionsLeft = sub.active
+    ? null
+    : Number.isFinite(Number(sub.sessionsLeft))
+    ? Math.max(0, Math.floor(Number(sub.sessionsLeft)))
+    : 0;
 
   return {
-    usedSeconds: 0,
-    limitSeconds: remainingSeconds,
-    remainingSeconds,
-    isLimited: remainingSeconds <= 0,
     isSubscribed: !!sub.active,
     subscriptionStatus: sub.status || "none",
     plan: sub.plan || null,
-    minutesLeft,
+    sessionsLeft,
+    freeTrialSessions: FREE_TRIAL_SESSIONS,
+    canStart: sub.active || sessionsLeft > 0,
   };
 }
 
-function getDefaultLocalTrialState() {
+async function consumeDictationSession() {
+  const sub = await getSubscriptionStatus(true);
+  if (sub.active) {
+    return {
+      isSubscribed: true,
+      sessionsLeft: null,
+      freeTrialSessions: FREE_TRIAL_SESSIONS,
+      subscriptionStatus: sub.status || "none",
+      plan: sub.plan || null,
+    };
+  }
+
+  const localState = await consumeLocalTrialSession();
+  subscriptionCache = {
+    deviceToken: await getOrCreateDeviceToken(),
+    active: false,
+    status: "none",
+    plan: null,
+    sessionsLeft: localState.sessionsLeft,
+    freeTrialSessions: FREE_TRIAL_SESSIONS,
+    timestamp: Date.now(),
+  };
+
   return {
-    minutesLeft: FREE_MINUTES,
-    updatedAt: Date.now(),
+    isSubscribed: false,
+    sessionsLeft: localState.sessionsLeft,
+    freeTrialSessions: FREE_TRIAL_SESSIONS,
+    subscriptionStatus: "none",
+    plan: null,
   };
-}
-
-function roundMinutes(value) {
-  return Math.max(0, Math.round(Number(value || 0) * 100) / 100);
-}
-
-async function getLocalTrialState() {
-  const result = await readStorage([LOCAL_TRIAL_STATE_KEY]);
-  const raw = result?.[LOCAL_TRIAL_STATE_KEY];
-  if (!raw || !Number.isFinite(Number(raw.minutesLeft))) {
-    const initial = getDefaultLocalTrialState();
-    await writeStorage({ [LOCAL_TRIAL_STATE_KEY]: initial });
-    return initial;
-  }
-
-  const normalized = {
-    minutesLeft: Math.min(FREE_MINUTES, roundMinutes(raw.minutesLeft)),
-    updatedAt: Number(raw.updatedAt) || Date.now(),
-  };
-  if (normalized.minutesLeft !== Number(raw.minutesLeft)) {
-    await writeStorage({ [LOCAL_TRIAL_STATE_KEY]: normalized });
-  }
-  return normalized;
-}
-
-async function consumeLocalTrialMinutes(seconds) {
-  const current = await getLocalTrialState();
-  const usageMinutes = roundMinutes(Math.max(0, Number(seconds) || 0) / 60);
-  const next = {
-    minutesLeft: roundMinutes(current.minutesLeft - usageMinutes),
-    updatedAt: Date.now(),
-  };
-  await writeStorage({ [LOCAL_TRIAL_STATE_KEY]: next });
-  return next;
-}
-
-async function addDictationUsage(seconds) {
-  const roundedSeconds = Math.max(0, Number(seconds) || 0);
-  if (!roundedSeconds) {
-    return getDictationQuota();
-  }
-
-  if (!isRemoteConfigured()) {
-    const localState = await consumeLocalTrialMinutes(roundedSeconds);
-    subscriptionCache = {
-      deviceToken: await getOrCreateDeviceToken(),
-      active: false,
-      status: "none",
-      plan: null,
-      minutesLeft: localState.minutesLeft,
-      remainingSeconds: localState.minutesLeft * 60,
-      freeTrialSeconds: FREE_MINUTES * 60,
-      timestamp: Date.now(),
-    };
-
-    return {
-      usedSeconds: roundedSeconds,
-      limitSeconds: localState.minutesLeft * 60,
-      remainingSeconds: localState.minutesLeft * 60,
-      isLimited: localState.minutesLeft <= 0,
-      isSubscribed: false,
-      subscriptionStatus: "none",
-      plan: null,
-      minutesLeft: localState.minutesLeft,
-    };
-  }
-
-  try {
-    const data = await fetchJsonFromEndpoints("/usage", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ seconds: roundedSeconds }),
-    });
-
-    subscriptionCache.timestamp = 0;
-    const remainingSeconds = Number.isFinite(Number(data.remainingSeconds))
-      ? Math.max(0, Number(data.remainingSeconds))
-      : Number.isFinite(Number(data.minutesLeft))
-      ? Math.max(0, Number(data.minutesLeft)) * 60
-      : 0;
-
-    return {
-      usedSeconds: roundedSeconds,
-      limitSeconds: remainingSeconds,
-      remainingSeconds,
-      isLimited: remainingSeconds <= 0,
-      isSubscribed: !!data.paid,
-      subscriptionStatus: data.subscriptionStatus || "none",
-      plan: data.plan ? { planId: data.plan } : null,
-      minutesLeft: remainingSeconds / 60,
-    };
-  } catch (_error) {
-    const localState = await consumeLocalTrialMinutes(roundedSeconds);
-    subscriptionCache = {
-      deviceToken: await getOrCreateDeviceToken(),
-      active: false,
-      status: "none",
-      plan: null,
-      minutesLeft: localState.minutesLeft,
-      remainingSeconds: localState.minutesLeft * 60,
-      freeTrialSeconds: FREE_MINUTES * 60,
-      timestamp: Date.now(),
-    };
-
-    return {
-      usedSeconds: roundedSeconds,
-      limitSeconds: localState.minutesLeft * 60,
-      remainingSeconds: localState.minutesLeft * 60,
-      isLimited: localState.minutesLeft <= 0,
-      isSubscribed: false,
-      subscriptionStatus: "none",
-      plan: null,
-      minutesLeft: localState.minutesLeft,
-    };
-  }
 }
 
 async function createCheckoutSession(planId, returnUrl) {
@@ -504,37 +438,6 @@ async function trackAnalyticsEvent(name, params = {}, sessionId = "") {
   };
 }
 
-async function transcribeAudio(message = {}) {
-  if (!isRemoteConfigured()) {
-    throw new Error("Configure the product backend before OpenAI transcription can run.");
-  }
-
-  const audioBase64 =
-    typeof message.audioBase64 === "string" ? message.audioBase64.trim() : "";
-  const mimeType =
-    typeof message.mimeType === "string" && message.mimeType.trim()
-      ? message.mimeType.trim()
-      : "audio/webm";
-
-  if (!audioBase64) {
-    throw new Error("Audio payload is missing.");
-  }
-
-  const data = await fetchJsonFromEndpoints("/transcribe", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    timeoutMs: 45000,
-    body: JSON.stringify({
-      audioBase64,
-      mimeType,
-    }),
-  });
-
-  return {
-    text: typeof data.text === "string" ? data.text : "",
-  };
-}
-
 function getDefaultTabState() {
   return {
     connected: false,
@@ -545,7 +448,7 @@ function getDefaultTabState() {
     transcript: "",
     interimTranscript: "",
     docTitle: "",
-    language: "en-US",
+    language: "Auto",
     insertedChars: 0,
     sessionSeconds: 0,
     cursorReady: false,
@@ -560,18 +463,6 @@ function queryActiveTab() {
         return;
       }
       resolve(tabs?.[0] || null);
-    });
-  });
-}
-
-function queryDocsTabs() {
-  return new Promise((resolve, reject) => {
-    chrome.tabs.query({ url: ["https://docs.google.com/document/*"] }, (tabs) => {
-      if (chrome.runtime.lastError) {
-        reject(new Error(chrome.runtime.lastError.message));
-        return;
-      }
-      resolve(tabs || []);
     });
   });
 }
@@ -771,11 +662,11 @@ async function getDictationState() {
   }
 }
 
-async function startDictation(payload = {}) {
+async function startDictation() {
   const tab = await getActiveDocsTab();
   const quota = await getDictationQuota();
-  if (quota.remainingSeconds <= 0) {
-    throw new Error("Free trial used. Upgrade to continue dictation.");
+  if (!quota.canStart) {
+    throw new Error("Free trial ended. Upgrade to continue dictation.");
   }
 
   await ensureDocsContentScript(tab.id);
@@ -783,10 +674,15 @@ async function startDictation(payload = {}) {
     type: "startDictation",
   });
 
+  let updatedQuota = quota;
+  if (!quota.isSubscribed && response?.started && !response?.alreadyRunning) {
+    updatedQuota = await consumeDictationSession();
+  }
+
   return {
     tabId: tab.id,
     ...response,
-    quota,
+    quota: updatedQuota,
   };
 }
 
@@ -829,13 +725,6 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     getDictationQuota()
       .then((result) => sendResponse({ ok: true, ...result }))
       .catch((error) => sendResponse({ ok: false, error: error.message || "Failed to read quota." }));
-    return true;
-  }
-
-  if (message.type === "addDictationUsage") {
-    addDictationUsage(message.seconds)
-      .then((result) => sendResponse({ ok: true, ...result }))
-      .catch((error) => sendResponse({ ok: false, error: error.message || "Failed to save usage." }));
     return true;
   }
 
@@ -889,16 +778,9 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   }
 
   if (message.type === "startDictation") {
-    startDictation(message)
+    startDictation()
       .then((result) => sendResponse({ ok: true, ...result }))
       .catch((error) => sendResponse({ ok: false, error: error.message || "Failed to start dictation." }));
-    return true;
-  }
-
-  if (message.type === "transcribeAudio") {
-    transcribeAudio(message)
-      .then((result) => sendResponse({ ok: true, ...result }))
-      .catch((error) => sendResponse({ ok: false, error: error.message || "Failed to transcribe audio." }));
     return true;
   }
 

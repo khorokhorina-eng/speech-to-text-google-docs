@@ -40,11 +40,7 @@ function loadEnvFile() {
 loadEnvFile();
 
 const PORT = Number(process.env.PORT || 8787);
-const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
-const OPENAI_TTS_MODEL = process.env.OPENAI_TTS_MODEL || "gpt-4o-mini-tts";
-const OPENAI_TTS_VOICE = process.env.OPENAI_TTS_VOICE || "alloy";
-const OPENAI_TRANSCRIBE_MODEL =
-  process.env.OPENAI_TRANSCRIBE_MODEL || "gpt-4o-mini-transcribe";
+const FREE_TRIAL_SESSIONS = Math.max(1, Number(process.env.FREE_TRIAL_SESSIONS || 15));
 const FREE_MINUTES = Math.max(1, Number(process.env.FREE_MINUTES || 2));
 const FREE_TRIAL_SECONDS = Math.max(1, Math.floor(FREE_MINUTES * 60));
 const CHAR_PER_MINUTE = Math.max(1, Number(process.env.CHAR_PER_MINUTE || 900));
@@ -909,9 +905,8 @@ async function handleAuthMe(req, res, parsedUrl) {
       subscriptionStatus: "none",
       plan: null,
       paid: false,
-      minutesLeft: FREE_MINUTES,
-      remainingSeconds: FREE_TRIAL_SECONDS,
-      freeTrialSeconds: FREE_TRIAL_SECONDS,
+      sessionsLeft: FREE_TRIAL_SESSIONS,
+      freeTrialSessions: FREE_TRIAL_SESSIONS,
     });
     return;
   }
@@ -934,11 +929,9 @@ async function handleAuthMe(req, res, parsedUrl) {
       paid: subscription.active,
       subscriptionStatus: subscription.status || "none",
       plan: subscription.plan?.planId || null,
-      minutesLeft: subscription.active ? paidMinutesLeft : displayMinutesFromSeconds(remainingSeconds),
-      remainingSeconds: subscription.active
-        ? Math.ceil(paidMinutesLeft * 60)
-        : remainingSeconds,
-      freeTrialSeconds: FREE_TRIAL_SECONDS,
+      sessionsLeft: subscription.active ? null : FREE_TRIAL_SESSIONS,
+      freeTrialSessions: FREE_TRIAL_SESSIONS,
+      paidMinutesLeft,
     });
   } catch (error) {
     sendJson(res, 500, { error: error.message || "Failed to read auth state." });
@@ -1316,9 +1309,8 @@ async function handleSubscriptionStatus(req, res, parsedUrl) {
       customerId: null,
       email: null,
       signedIn: false,
-      minutesLeft: FREE_MINUTES,
-      remainingSeconds: FREE_TRIAL_SECONDS,
-      freeTrialSeconds: FREE_TRIAL_SECONDS,
+      sessionsLeft: FREE_TRIAL_SESSIONS,
+      freeTrialSessions: FREE_TRIAL_SESSIONS,
     });
     return;
   }
@@ -1335,11 +1327,9 @@ async function handleSubscriptionStatus(req, res, parsedUrl) {
     sendJson(res, 200, {
       deviceToken,
       ...status,
-      minutesLeft: status.active ? paidMinutesLeft : displayMinutesFromSeconds(remainingSeconds),
-      remainingSeconds: status.active
-        ? Math.ceil(paidMinutesLeft * 60)
-        : remainingSeconds,
-      freeTrialSeconds: FREE_TRIAL_SECONDS,
+      sessionsLeft: status.active ? null : FREE_TRIAL_SESSIONS,
+      freeTrialSessions: FREE_TRIAL_SESSIONS,
+      paidMinutesLeft,
       paid: status.active,
       subscriptionStatus: status.status || "none",
     });
@@ -1408,339 +1398,6 @@ async function handleStripeWebhook(req, res) {
     sendJson(res, 200, { received: true });
   } catch (error) {
     sendJson(res, 500, { error: error.message || "Webhook handler failed." });
-  }
-}
-
-async function handleUsage(req, res, parsedUrl) {
-  let body;
-  try {
-    body = await parseJsonBody(req);
-  } catch (error) {
-    sendJson(res, 400, { error: error.message || "Invalid request body." });
-    return;
-  }
-
-  const deviceToken = getDeviceToken(req, parsedUrl, body);
-  if (!deviceToken) {
-    sendJson(res, 400, { error: "Missing device token." });
-    return;
-  }
-
-  const seconds = Math.max(0, Number(body.seconds) || 0);
-  const usageSeconds = normalizeSeconds(Math.ceil(seconds));
-  const usageCostMinutes = roundUsageMinutes(usageSeconds / 60);
-
-  const state = readState();
-  const account = getAccountForDevice(state, deviceToken);
-  const subscription = await lookupSubscriptionStatusForAccount(state, account);
-
-  if (!subscription.active) {
-    if (!deductFreeTrialSeconds(state, account, deviceToken, usageSeconds)) {
-      sendJson(res, 402, { error: "not-enough-queries" });
-      return;
-    }
-  } else if (!deductPaidMinutes(state, account, subscription, usageCostMinutes)) {
-    sendJson(res, 402, { error: "paid-plan-limit-reached" });
-    return;
-  }
-
-  writeState(state);
-  const remainingSeconds = subscription.active
-    ? null
-    : getFreeTrialRemainingSeconds(state, account, deviceToken);
-  const paidMinutesLeft = getPaidMinutesLeft(state, account, subscription);
-
-  sendJson(res, 200, {
-    ok: true,
-    paid: subscription.active,
-    subscriptionStatus: subscription.status || "none",
-    plan: subscription.plan?.planId || null,
-    minutesLeft: subscription.active ? paidMinutesLeft : displayMinutesFromSeconds(remainingSeconds),
-    remainingSeconds: subscription.active
-      ? Math.ceil(paidMinutesLeft * 60)
-      : remainingSeconds,
-    freeTrialSeconds: FREE_TRIAL_SECONDS,
-  });
-}
-
-async function handleTranscribe(req, res, parsedUrl) {
-  if (!OPENAI_API_KEY) {
-    sendJson(res, 500, { error: "OPENAI_API_KEY is not set." });
-    return;
-  }
-
-  let body;
-  try {
-    body = await parseJsonBody(req);
-  } catch (error) {
-    sendJson(res, 400, { error: error.message || "Invalid request body." });
-    return;
-  }
-
-  const deviceToken = getDeviceToken(req, parsedUrl, body);
-  if (!deviceToken) {
-    sendJson(res, 400, { error: "Missing device token." });
-    return;
-  }
-
-  const audioBase64 =
-    typeof body.audioBase64 === "string" ? body.audioBase64.trim() : "";
-  const mimeType =
-    typeof body.mimeType === "string" && body.mimeType.trim()
-      ? body.mimeType.trim()
-      : "audio/webm";
-
-  if (!audioBase64) {
-    sendJson(res, 400, { error: "audioBase64 is required." });
-    return;
-  }
-
-  let audioBuffer;
-  try {
-    audioBuffer = Buffer.from(audioBase64, "base64");
-  } catch (_error) {
-    sendJson(res, 400, { error: "Invalid audio payload." });
-    return;
-  }
-
-  if (!audioBuffer.length) {
-    sendJson(res, 400, { error: "Audio payload is empty." });
-    return;
-  }
-
-  try {
-    const form = new FormData();
-    form.append(
-      "file",
-      new Blob([audioBuffer], { type: mimeType }),
-      `dictation.${guessAudioExtension(mimeType)}`
-    );
-    form.append("model", OPENAI_TRANSCRIBE_MODEL);
-
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 45000);
-    const upstream = await fetch("https://api.openai.com/v1/audio/transcriptions", {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${OPENAI_API_KEY}`,
-      },
-      body: form,
-      signal: controller.signal,
-    });
-    clearTimeout(timeoutId);
-
-    const payload = await upstream.json().catch(() => ({}));
-    if (!upstream.ok) {
-      sendJson(res, upstream.status, {
-        error:
-          payload?.error?.message ||
-          payload?.error ||
-          "OpenAI transcription request failed.",
-      });
-      return;
-    }
-
-    sendJson(res, 200, {
-      ok: true,
-      text: typeof payload?.text === "string" ? payload.text : "",
-    });
-  } catch (error) {
-    sendJson(res, 502, {
-      error:
-        error?.name === "AbortError"
-          ? "OpenAI transcription timed out. Please try a shorter recording."
-          : error.message || "Failed to call OpenAI transcription.",
-    });
-  }
-}
-
-async function handleTranscribeRaw(req, res, parsedUrl) {
-  if (!OPENAI_API_KEY) {
-    sendJson(res, 500, { error: "OPENAI_API_KEY is not set." });
-    return;
-  }
-
-  const deviceToken = getDeviceToken(req, parsedUrl, null);
-  if (!deviceToken) {
-    sendJson(res, 400, { error: "Missing device token." });
-    return;
-  }
-
-  const mimeType =
-    typeof req.headers["x-audio-mime"] === "string" && req.headers["x-audio-mime"].trim()
-      ? req.headers["x-audio-mime"].trim()
-      : "audio/webm";
-
-  let audioBuffer;
-  try {
-    audioBuffer = await readBinaryBody(req);
-  } catch (error) {
-    sendJson(res, 400, { error: error.message || "Invalid audio payload." });
-    return;
-  }
-
-  if (!audioBuffer?.length) {
-    sendJson(res, 400, { error: "Audio payload is empty." });
-    return;
-  }
-
-  try {
-    const form = new FormData();
-    form.append(
-      "file",
-      new Blob([audioBuffer], { type: mimeType }),
-      `dictation.${guessAudioExtension(mimeType)}`
-    );
-    form.append("model", OPENAI_TRANSCRIBE_MODEL);
-
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 45000);
-    const upstream = await fetch("https://api.openai.com/v1/audio/transcriptions", {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${OPENAI_API_KEY}`,
-      },
-      body: form,
-      signal: controller.signal,
-    });
-    clearTimeout(timeoutId);
-
-    const payload = await upstream.json().catch(() => ({}));
-    if (!upstream.ok) {
-      sendJson(res, upstream.status, {
-        error:
-          payload?.error?.message ||
-          payload?.error ||
-          "OpenAI transcription request failed.",
-      });
-      return;
-    }
-
-    sendJson(res, 200, {
-      ok: true,
-      text: typeof payload?.text === "string" ? payload.text : "",
-    });
-  } catch (error) {
-    sendJson(res, 502, {
-      error:
-        error?.name === "AbortError"
-          ? "OpenAI transcription timed out. Please try a shorter recording."
-          : error.message || "Failed to call OpenAI transcription.",
-    });
-  }
-}
-
-async function handleTts(req, res, parsedUrl) {
-  if (!OPENAI_API_KEY) {
-    sendJson(res, 500, { error: "OPENAI_API_KEY is not set." });
-    return;
-  }
-
-  let body;
-  try {
-    body = await parseJsonBody(req);
-  } catch (error) {
-    sendJson(res, 400, { error: error.message || "Invalid request body." });
-    return;
-  }
-
-  const text =
-    typeof body.input === "string" && body.input.trim()
-      ? body.input.trim()
-      : typeof body.text === "string"
-      ? body.text.trim()
-      : "";
-  const speed = Number(body.speed);
-
-  if (!text) {
-    sendJson(res, 400, { error: "Text is required." });
-    return;
-  }
-
-  const deviceToken = getDeviceToken(req, parsedUrl, body);
-  if (!deviceToken) {
-    sendJson(res, 400, { error: "Missing device token." });
-    return;
-  }
-
-  const state = readState();
-  const account = getAccountForDevice(state, deviceToken);
-  const subscription = await lookupSubscriptionStatusForAccount(state, account);
-  const usageCost = Math.max(1, Math.ceil(text.length / CHAR_PER_MINUTE));
-  const usageSeconds = usageCost * 60;
-  const shouldChargeTrial = !subscription.active;
-  const shouldChargePaidPlan = subscription.active;
-
-  if (shouldChargeTrial) {
-    if (!deductFreeTrialSeconds(state, account, deviceToken, usageSeconds)) {
-      sendJson(res, 402, { error: "not-enough-queries" });
-      return;
-    }
-    writeState(state);
-  }
-
-  if (shouldChargePaidPlan) {
-    if (!deductPaidMinutes(state, account, subscription, usageCost)) {
-      sendJson(res, 402, { error: "paid-plan-limit-reached" });
-      return;
-    }
-    writeState(state);
-  }
-
-  const payload = {
-    model: OPENAI_TTS_MODEL,
-    voice: OPENAI_TTS_VOICE,
-    input: text,
-    response_format: "mp3",
-  };
-
-  if (Number.isFinite(speed)) {
-    payload.speed = Math.min(4, Math.max(0.25, speed));
-  }
-
-  try {
-    const upstream = await fetch("https://api.openai.com/v1/audio/speech", {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${OPENAI_API_KEY}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify(payload),
-    });
-
-    if (!upstream.ok) {
-      const details = await upstream.text().catch(() => "");
-      if (shouldChargeTrial) {
-        refundFreeTrialSeconds(state, account, deviceToken, usageSeconds);
-        writeState(state);
-      }
-      if (shouldChargePaidPlan) {
-        refundPaidMinutes(state, account, subscription, usageCost);
-        writeState(state);
-      }
-      sendJson(res, upstream.status, {
-        error: details || "OpenAI TTS request failed.",
-      });
-      return;
-    }
-
-    const buffer = Buffer.from(await upstream.arrayBuffer());
-    setCorsHeaders(res);
-    res.writeHead(200, {
-      "Content-Type": upstream.headers.get("content-type") || "audio/mpeg",
-      "Cache-Control": "no-store",
-    });
-    res.end(buffer);
-  } catch (error) {
-    if (shouldChargeTrial) {
-      refundFreeTrialSeconds(state, account, deviceToken, usageSeconds);
-      writeState(state);
-    }
-    if (shouldChargePaidPlan) {
-      refundPaidMinutes(state, account, subscription, usageCost);
-      writeState(state);
-    }
-    sendJson(res, 502, { error: error.message || "Failed to call OpenAI TTS." });
   }
 }
 
@@ -1885,26 +1542,6 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
-  if (req.method === "POST" && parsedUrl.pathname === "/tts") {
-    await handleTts(req, res, parsedUrl);
-    return;
-  }
-
-  if (req.method === "POST" && parsedUrl.pathname === "/transcribe") {
-    await handleTranscribe(req, res, parsedUrl);
-    return;
-  }
-
-  if (req.method === "POST" && parsedUrl.pathname === "/transcribe-raw") {
-    await handleTranscribeRaw(req, res, parsedUrl);
-    return;
-  }
-
-  if (req.method === "POST" && parsedUrl.pathname === "/usage") {
-    await handleUsage(req, res, parsedUrl);
-    return;
-  }
-
   if (req.method === "POST" && parsedUrl.pathname === "/analytics/event") {
     await handleAnalyticsEvent(req, res, parsedUrl);
     return;
@@ -1947,12 +1584,12 @@ const server = http.createServer(async (req, res) => {
 server.listen(PORT, "127.0.0.1", () => {
   console.log(`Proxy server is running on http://127.0.0.1:${PORT}`);
   console.log(
-    "Required env: OPENAI_API_KEY, STRIPE_SECRET_KEY, STRIPE_WEBHOOK_SECRET, STRIPE_MONTHLY_PRICE_ID, STRIPE_YEARLY_PRICE_ID, PUBLIC_BASE_URL"
+    "Required env: STRIPE_SECRET_KEY, STRIPE_WEBHOOK_SECRET, STRIPE_MONTHLY_PRICE_ID, STRIPE_YEARLY_PRICE_ID, PUBLIC_BASE_URL"
   );
   console.log(
     "Optional auth env: GOOGLE_OAUTH_CLIENT_ID, GOOGLE_OAUTH_CLIENT_SECRET"
   );
   console.log(
-    "Optional quota env: FREE_MINUTES, CHAR_PER_MINUTE, MONTHLY_MINUTES, ANNUAL_MINUTES"
+    "Optional quota env: FREE_TRIAL_SESSIONS, FREE_MINUTES, CHAR_PER_MINUTE, MONTHLY_MINUTES, ANNUAL_MINUTES"
   );
 });
