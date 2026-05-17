@@ -13,7 +13,7 @@ const state = {
   transcript: "",
   interimTranscript: "",
   docTitle: document.title.replace(/\s*-\s*Google Docs\s*$/, ""),
-  language: navigator.language || "en-US",
+  language: "Auto",
   insertedChars: 0,
   sessionSeconds: 0,
   cursorReady: false,
@@ -784,7 +784,26 @@ let insertionHistory = [];
 let manualStopMessage = "Dictation stopped.";
 let terminalEndState = null;
 let pendingInterimText = "";
-const ACTIVE_VOICE_COMMANDS = buildVoiceCommands(state.language);
+let selectedRecognitionLanguage = "Auto";
+let activeVoiceCommands = buildVoiceCommands(navigator.language || "en-US");
+
+function resolveRecognitionLanguage(language) {
+  const normalized = typeof language === "string" && language.trim() ? language.trim() : "Auto";
+  return normalized === "Auto" ? navigator.language || "en-US" : normalized;
+}
+
+function applyRecognitionLanguage(language, { skipUpdate = false } = {}) {
+  selectedRecognitionLanguage =
+    typeof language === "string" && language.trim() ? language.trim() : "Auto";
+  state.language = selectedRecognitionLanguage;
+  activeVoiceCommands = buildVoiceCommands(resolveRecognitionLanguage(selectedRecognitionLanguage));
+  if (recognition) {
+    recognition.lang = resolveRecognitionLanguage(selectedRecognitionLanguage);
+  }
+  if (!skipUpdate) {
+    sendStateUpdate();
+  }
+}
 
 function sendRuntimeMessage(message) {
   return new Promise((resolve, reject) => {
@@ -1122,7 +1141,7 @@ function normalizeTranscriptChunk(text) {
   }
 
   let normalized = text.replace(/\s+/g, " ").trim();
-  ACTIVE_VOICE_COMMANDS.forEach(({ pattern, value }) => {
+  activeVoiceCommands.forEach(({ pattern, value }) => {
     normalized = normalized.replace(pattern, value);
   });
 
@@ -1150,7 +1169,7 @@ function endsWithSpokenPunctuationCommand(rawText) {
   if (!candidate) {
     return false;
   }
-  return ACTIVE_VOICE_COMMANDS.some(
+  return activeVoiceCommands.some(
     (command) => command.tailPattern && command.tailPattern.test(candidate)
   );
 }
@@ -1385,7 +1404,7 @@ function createRecognition() {
   const next = new SpeechRecognitionCtor();
   next.continuous = true;
   next.interimResults = true;
-  next.lang = navigator.language || "en-US";
+  next.lang = resolveRecognitionLanguage(selectedRecognitionLanguage);
 
   next.onstart = () => {
     setStatus("listening", "Listening with Google speech recognition...");
@@ -1499,7 +1518,10 @@ function createRecognition() {
   return next;
 }
 
-async function startDictation() {
+async function startDictation(options = {}) {
+  if (options.language) {
+    applyRecognitionLanguage(options.language, { skipUpdate: true });
+  }
   if (!HAS_RECOGNITION_SUPPORT) {
     throw new Error("This browser does not support speech recognition.");
   }
@@ -1618,8 +1640,21 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     return false;
   }
 
+  if (message.type === "setRecognitionLanguage") {
+    applyRecognitionLanguage(message.language);
+    sendResponse({
+      ok: true,
+      language: state.language,
+      state: {
+        ...state,
+        docTitle: document.title.replace(/\s*-\s*Google Docs\s*$/, ""),
+      },
+    });
+    return false;
+  }
+
   if (message.type === "startDictation") {
-    startDictation()
+    startDictation({ language: message.language })
       .then((result) => sendResponse({ ok: true, ...result }))
       .catch((error) => sendResponse({ ok: false, error: error.message || "Failed to start dictation." }));
     return true;
@@ -1635,4 +1670,5 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   return false;
 });
 
+applyRecognitionLanguage("Auto", { skipUpdate: true });
 sendStateUpdate();

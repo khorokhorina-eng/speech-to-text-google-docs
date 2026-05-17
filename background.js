@@ -5,6 +5,7 @@ const UNINSTALL_URL = `${REMOTE_API_BASE_URL}/uninstall.html`;
 const DEVICE_TOKEN_KEY = "deviceToken";
 const AUTH_SESSION_KEY = "authSession";
 const LOCAL_TRIAL_STATE_KEY = "localTrialState";
+const DICTATION_LANGUAGE_KEY = "dictationLanguage";
 const SUBSCRIPTION_CACHE_MS = 30 * 1000;
 
 let subscriptionCache = {
@@ -255,6 +256,21 @@ async function consumeLocalTrialSession() {
   };
   await writeStorage({ [LOCAL_TRIAL_STATE_KEY]: next });
   return next;
+}
+
+async function getRecognitionLanguageSetting() {
+  const result = await readStorage([DICTATION_LANGUAGE_KEY]);
+  const raw = typeof result?.[DICTATION_LANGUAGE_KEY] === "string" ? result[DICTATION_LANGUAGE_KEY].trim() : "";
+  if (!raw) {
+    return "Auto";
+  }
+  return raw;
+}
+
+async function setRecognitionLanguageSetting(language) {
+  const normalized = typeof language === "string" && language.trim() ? language.trim() : "Auto";
+  await writeStorage({ [DICTATION_LANGUAGE_KEY]: normalized });
+  return normalized;
 }
 
 async function getSubscriptionStatus(forceRefresh = false) {
@@ -625,12 +641,14 @@ async function ensureDocsContentScript(tabId) {
 
 async function getDictationState() {
   const tab = await queryActiveTab();
+  const selectedLanguage = await getRecognitionLanguageSetting();
   if (!tab?.id) {
-    return getDefaultTabState();
+    return { ...getDefaultTabState(), language: selectedLanguage };
   }
 
   const defaultState = {
     ...getDefaultTabState(),
+    language: selectedLanguage,
     isDocsPage: typeof tab.url === "string" && tab.url.startsWith("https://docs.google.com/document/"),
     docTitle: tab.title || "",
   };
@@ -641,6 +659,7 @@ async function getDictationState() {
 
   try {
     await ensureDocsContentScript(tab.id);
+    await sendMessageToTab(tab.id, { type: "setRecognitionLanguage", language: selectedLanguage });
     const response = await sendMessageToTab(tab.id, { type: "getDictationState" });
     const nextState = {
       ...defaultState,
@@ -665,6 +684,7 @@ async function getDictationState() {
 async function startDictation() {
   const tab = await getActiveDocsTab();
   const quota = await getDictationQuota();
+  const language = await getRecognitionLanguageSetting();
   if (!quota.canStart) {
     throw new Error("Free trial ended. Upgrade to continue dictation.");
   }
@@ -672,6 +692,7 @@ async function startDictation() {
   await ensureDocsContentScript(tab.id);
   const response = await sendMessageToTab(tab.id, {
     type: "startDictation",
+    language,
   });
 
   let updatedQuota = quota;
@@ -774,6 +795,20 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     getDictationState()
       .then((result) => sendResponse({ ok: true, state: result }))
       .catch((error) => sendResponse({ ok: false, error: error.message || "Failed to read dictation state." }));
+    return true;
+  }
+
+  if (message.type === "getRecognitionLanguage") {
+    getRecognitionLanguageSetting()
+      .then((language) => sendResponse({ ok: true, language }))
+      .catch((error) => sendResponse({ ok: false, error: error.message || "Failed to read language." }));
+    return true;
+  }
+
+  if (message.type === "setRecognitionLanguage") {
+    setRecognitionLanguageSetting(message.language)
+      .then((language) => sendResponse({ ok: true, language }))
+      .catch((error) => sendResponse({ ok: false, error: error.message || "Failed to save language." }));
     return true;
   }
 

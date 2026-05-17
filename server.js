@@ -43,7 +43,6 @@ const PORT = Number(process.env.PORT || 8787);
 const FREE_TRIAL_SESSIONS = Math.max(1, Number(process.env.FREE_TRIAL_SESSIONS || 15));
 const FREE_MINUTES = Math.max(1, Number(process.env.FREE_MINUTES || 2));
 const FREE_TRIAL_SECONDS = Math.max(1, Math.floor(FREE_MINUTES * 60));
-const CHAR_PER_MINUTE = Math.max(1, Number(process.env.CHAR_PER_MINUTE || 900));
 const PUBLIC_BASE_URL = (process.env.PUBLIC_BASE_URL || "").replace(/\/+$/, "");
 
 const STRIPE_SECRET_KEY = process.env.STRIPE_SECRET_KEY;
@@ -62,14 +61,14 @@ const PLAN_DEFINITIONS = [
   {
     id: "monthly",
     name: "Monthly plan",
-    description: "Speech-to-text access with 300 minutes each month.",
+    description: "Unlimited dictation in Google Docs with monthly billing.",
     stripePriceId: STRIPE_MONTHLY_PRICE_ID,
     includedMinutes: Math.max(1, Number(process.env.MONTHLY_MINUTES || 300)),
   },
   {
     id: "annual",
     name: "Annual plan",
-    description: "Speech-to-text access with 60 hours each year.",
+    description: "Unlimited dictation in Google Docs with annual billing.",
     stripePriceId: STRIPE_ANNUAL_PRICE_ID,
     includedMinutes: Math.max(1, Number(process.env.ANNUAL_MINUTES || 3600)),
   },
@@ -152,6 +151,39 @@ function sanitizeAnalyticsParams(rawParams) {
       sanitized[normalizedKey] = value ? "true" : "false";
       continue;
     }
+    if (Array.isArray(value)) {
+      const normalizedItems = value
+        .map((entry) => {
+          if (!entry || typeof entry !== "object" || Array.isArray(entry)) {
+            return null;
+          }
+          const nextEntry = {};
+          for (const [itemKey, itemValue] of Object.entries(entry)) {
+            const nextKey = String(itemKey || "")
+              .trim()
+              .toLowerCase()
+              .replace(/[^a-z0-9_]+/g, "_")
+              .replace(/^_+|_+$/g, "")
+              .slice(0, 40);
+            if (!nextKey) {
+              continue;
+            }
+            if (typeof itemValue === "string") {
+              nextEntry[nextKey] = itemValue.slice(0, 100);
+            } else if (typeof itemValue === "boolean") {
+              nextEntry[nextKey] = itemValue ? "true" : "false";
+            } else if (Number.isFinite(Number(itemValue))) {
+              nextEntry[nextKey] = Number(itemValue);
+            }
+          }
+          return Object.keys(nextEntry).length ? nextEntry : null;
+        })
+        .filter(Boolean);
+      if (normalizedItems.length) {
+        sanitized[normalizedKey] = normalizedItems;
+      }
+      continue;
+    }
     if (Number.isFinite(Number(value))) {
       sanitized[normalizedKey] = Number(value);
     }
@@ -229,6 +261,8 @@ function createEmptyState() {
     accountToCustomer: {},
     customerToAccount: {},
     sessionToAccount: {},
+    sessionToReturnUrl: {},
+    purchaseEventsSent: {},
     googleStates: {},
   };
 }
@@ -248,6 +282,35 @@ function cleanupState(state) {
       delete state.googleStates[token];
     }
   });
+
+  Object.entries(state.purchaseEventsSent || {}).forEach(([sessionId, sentAt]) => {
+    const timestamp = Date.parse(sentAt || "");
+    if (!Number.isFinite(timestamp) || timestamp < now - 1000 * 60 * 60 * 24 * 30) {
+      delete state.purchaseEventsSent[sessionId];
+    }
+  });
+}
+
+function buildPurchaseAnalyticsParamsFromSession(session, planLookup, fallbackPlanId, fallbackPlanName) {
+  const planId =
+    session?.metadata?.planId ||
+    session?.subscription_details?.metadata?.planId ||
+    fallbackPlanId;
+  const planName = planLookup(planId)?.name || fallbackPlanName;
+  const amount = Number(session?.amount_total || 0) / 100;
+  return {
+    transaction_id: String(session?.id || ""),
+    value: amount,
+    currency: String(session?.currency || "usd").toUpperCase(),
+    items: [
+      {
+        item_id: String(planId || fallbackPlanId),
+        item_name: String(planName),
+        price: amount,
+        quantity: 1,
+      },
+    ],
+  };
 }
 
 function readState() {
@@ -915,10 +978,9 @@ async function handleAuthMe(req, res, parsedUrl) {
     const state = readState();
     const account = getAccountForDevice(state, deviceToken);
     const subscription = await lookupSubscriptionStatusForAccount(state, account);
-    const remainingSeconds = subscription.active
-      ? null
-      : getFreeTrialRemainingSeconds(state, account, deviceToken);
-    const paidMinutesLeft = getPaidMinutesLeft(state, account, subscription);
+    if (!subscription.active) {
+      getFreeTrialRemainingSeconds(state, account, deviceToken);
+    }
 
     writeState(state);
     sendJson(res, 200, {
@@ -931,7 +993,6 @@ async function handleAuthMe(req, res, parsedUrl) {
       plan: subscription.plan?.planId || null,
       sessionsLeft: subscription.active ? null : FREE_TRIAL_SESSIONS,
       freeTrialSessions: FREE_TRIAL_SESSIONS,
-      paidMinutesLeft,
     });
   } catch (error) {
     sendJson(res, 500, { error: error.message || "Failed to read auth state." });
@@ -1163,7 +1224,7 @@ async function handleGoogleCallback(_req, res, parsedUrl) {
     writeState(state);
 
     const trialMessage = trialSync.reducedByAccount
-      ? " This Google account already used part of the free trial, so your remaining trial time was updated."
+      ? " This Google account already used part of the free trial, so your remaining free sessions were updated."
       : "";
 
     sendHtml(
@@ -1286,6 +1347,7 @@ async function handleCreateCheckoutSession(req, res, parsedUrl) {
     });
 
     state.sessionToAccount[session.id] = account.id;
+    state.sessionToReturnUrl[session.id] = returnUrl || "";
     rememberAccountCustomer(state, account.id, customerId);
     writeState(state);
 
@@ -1319,17 +1381,15 @@ async function handleSubscriptionStatus(req, res, parsedUrl) {
     const state = readState();
     const account = getAccountForDevice(state, deviceToken);
     const status = await lookupSubscriptionStatusForAccount(state, account);
-    const remainingSeconds = status.active
-      ? null
-      : getFreeTrialRemainingSeconds(state, account, deviceToken);
-    const paidMinutesLeft = getPaidMinutesLeft(state, account, status);
+    if (!status.active) {
+      getFreeTrialRemainingSeconds(state, account, deviceToken);
+    }
     writeState(state);
     sendJson(res, 200, {
       deviceToken,
       ...status,
       sessionsLeft: status.active ? null : FREE_TRIAL_SESSIONS,
       freeTrialSessions: FREE_TRIAL_SESSIONS,
-      paidMinutesLeft,
       paid: status.active,
       subscriptionStatus: status.status || "none",
     });
@@ -1381,6 +1441,29 @@ async function handleStripeWebhook(req, res) {
         "";
       const customerId = typeof session.customer === "string" ? session.customer : "";
       rememberAccountCustomer(state, accountId, customerId);
+      if (!state.purchaseEventsSent?.[session.id]) {
+        const purchaseParams = buildPurchaseAnalyticsParamsFromSession(
+          session,
+          getPlanById,
+          "speech-to-text-google-docs-plan",
+          "Speech to Text Google Docs plan"
+        );
+        await sendGa4Measurement({
+          clientId: session.metadata?.deviceToken || customerId || session.id,
+          userId: accountId || "",
+          sessionId: session.id,
+          eventName: "purchase",
+          params: {
+            product: "speech_to_text_google_docs",
+            signed_in: Boolean(accountId),
+            ...purchaseParams,
+          },
+        });
+        console.log(
+          `[analytics] purchase sent to GA4 product=speech_to_text_google_docs session_id=${session.id} account_id=${accountId || "none"}`
+        );
+        state.purchaseEventsSent[session.id] = nowIso();
+      }
     }
 
     if (
@@ -1397,6 +1480,12 @@ async function handleStripeWebhook(req, res) {
     writeState(state);
     sendJson(res, 200, { received: true });
   } catch (error) {
+    if (event?.type === "checkout.session.completed") {
+      const sessionId = event?.data?.object?.id || "unknown";
+      console.error(
+        `[analytics] purchase failed to send to GA4 product=speech_to_text_google_docs session_id=${sessionId}: ${error.message || error}`
+      );
+    }
     sendJson(res, 500, { error: error.message || "Webhook handler failed." });
   }
 }
@@ -1446,7 +1535,12 @@ async function handleAnalyticsEvent(req, res, parsedUrl) {
 }
 
 async function handleSuccessPage(res, parsedUrl) {
+  const state = readState();
   const sessionId = parsedUrl.searchParams.get("session_id") || "";
+  const mappedReturnUrl = sessionId ? state.sessionToReturnUrl?.[sessionId] || "" : "";
+  const returnUrl =
+    sanitizeReturnUrl(parsedUrl.searchParams.get("return_url") || "") ||
+    sanitizeReturnUrl(mappedReturnUrl);
   let purchase = null;
 
   if (stripe && sessionId) {
@@ -1475,12 +1569,12 @@ async function handleSuccessPage(res, parsedUrl) {
   }
 
   sendHtml(
-    res,
-    200,
-    renderAuthCompletePage(
+      res,
+      200,
+      renderAuthCompletePage(
       "Payment successful",
-      "Your subscription is active. Return to the extension and refresh your account state.",
-      "",
+      "Unlimited dictation is active on this account. Return to the extension to keep working.",
+      returnUrl,
       purchase
         ? {
             name: "purchase",
@@ -1590,6 +1684,6 @@ server.listen(PORT, "127.0.0.1", () => {
     "Optional auth env: GOOGLE_OAUTH_CLIENT_ID, GOOGLE_OAUTH_CLIENT_SECRET"
   );
   console.log(
-    "Optional quota env: FREE_TRIAL_SESSIONS, FREE_MINUTES, CHAR_PER_MINUTE, MONTHLY_MINUTES, ANNUAL_MINUTES"
+    "Optional quota env: FREE_TRIAL_SESSIONS, FREE_MINUTES, MONTHLY_MINUTES, ANNUAL_MINUTES"
   );
 });

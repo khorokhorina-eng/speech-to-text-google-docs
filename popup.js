@@ -2,6 +2,7 @@ const statusEl = document.getElementById("status");
 const hintEl = document.getElementById("hint");
 const docTitleEl = document.getElementById("docTitle");
 const quotaEl = document.getElementById("quota");
+const languageSelectEl = document.getElementById("languageSelect");
 const recordingTipsEl = document.getElementById("recordingTips");
 const startBtn = document.getElementById("start");
 const stopBtn = document.getElementById("stop");
@@ -35,6 +36,61 @@ const backToReaderBtn = document.getElementById("backToReader");
 
 const ANALYTICS_SESSION_ID = `${Date.now()}_${Math.random().toString(16).slice(2, 10)}`;
 const FREE_TRIAL_SESSIONS = 15;
+const RECOGNITION_LANGUAGE_OPTIONS = [
+  { value: "Auto", label: "Auto (browser language)" },
+  { value: "am-ET", label: "Amharic" },
+  { value: "ar", label: "Arabic" },
+  { value: "bg-BG", label: "Bulgarian" },
+  { value: "bn-BD", label: "Bengali" },
+  { value: "ca-ES", label: "Catalan" },
+  { value: "cs-CZ", label: "Czech" },
+  { value: "da-DK", label: "Danish" },
+  { value: "de-DE", label: "German" },
+  { value: "el-GR", label: "Greek" },
+  { value: "en-US", label: "English" },
+  { value: "es-ES", label: "Spanish" },
+  { value: "es-419", label: "Spanish (Latin America)" },
+  { value: "et-EE", label: "Estonian" },
+  { value: "fa-IR", label: "Persian" },
+  { value: "fi-FI", label: "Finnish" },
+  { value: "fil-PH", label: "Filipino" },
+  { value: "fr-FR", label: "French" },
+  { value: "gu-IN", label: "Gujarati" },
+  { value: "he-IL", label: "Hebrew" },
+  { value: "hi-IN", label: "Hindi" },
+  { value: "hr-HR", label: "Croatian" },
+  { value: "hu-HU", label: "Hungarian" },
+  { value: "id-ID", label: "Indonesian" },
+  { value: "it-IT", label: "Italian" },
+  { value: "ja-JP", label: "Japanese" },
+  { value: "kn-IN", label: "Kannada" },
+  { value: "ko-KR", label: "Korean" },
+  { value: "lt-LT", label: "Lithuanian" },
+  { value: "lv-LV", label: "Latvian" },
+  { value: "ml-IN", label: "Malayalam" },
+  { value: "mr-IN", label: "Marathi" },
+  { value: "ms-MY", label: "Malay" },
+  { value: "nl-NL", label: "Dutch" },
+  { value: "no-NO", label: "Norwegian" },
+  { value: "pl-PL", label: "Polish" },
+  { value: "pt-BR", label: "Portuguese (Brazil)" },
+  { value: "pt-PT", label: "Portuguese (Portugal)" },
+  { value: "ro-RO", label: "Romanian" },
+  { value: "ru-RU", label: "Russian" },
+  { value: "sk-SK", label: "Slovak" },
+  { value: "sl-SI", label: "Slovenian" },
+  { value: "sr-RS", label: "Serbian" },
+  { value: "sv-SE", label: "Swedish" },
+  { value: "sw-KE", label: "Swahili" },
+  { value: "ta-IN", label: "Tamil" },
+  { value: "te-IN", label: "Telugu" },
+  { value: "th-TH", label: "Thai" },
+  { value: "tr-TR", label: "Turkish" },
+  { value: "uk-UA", label: "Ukrainian" },
+  { value: "vi-VN", label: "Vietnamese" },
+  { value: "zh-CN", label: "Chinese (Simplified)" },
+  { value: "zh-TW", label: "Chinese (Traditional)" },
+];
 
 const state = {
   dictation: {
@@ -159,6 +215,19 @@ function formatSessions(value) {
   }
   const rounded = Math.max(0, Math.floor(numeric));
   return `${rounded} ${rounded === 1 ? "session" : "sessions"}`;
+}
+
+function populateRecognitionLanguageOptions() {
+  if (!languageSelectEl) {
+    return;
+  }
+  languageSelectEl.textContent = "";
+  RECOGNITION_LANGUAGE_OPTIONS.forEach((option) => {
+    const nextOption = document.createElement("option");
+    nextOption.value = option.value;
+    nextOption.textContent = option.label;
+    languageSelectEl.appendChild(nextOption);
+  });
 }
 
 function isTrialEndedState() {
@@ -402,6 +471,33 @@ async function loadSubscriptionStatus() {
   updateUI();
 }
 
+async function loadRecognitionLanguage() {
+  try {
+    const result = await sendRuntimeMessage({ type: "getRecognitionLanguage" });
+    state.dictation.language = result.language || "Auto";
+  } catch (_error) {
+    state.dictation.language = "Auto";
+  }
+  if (languageSelectEl) {
+    languageSelectEl.value = state.dictation.language || "Auto";
+  }
+}
+
+async function setRecognitionLanguage(language) {
+  const nextLanguage = typeof language === "string" && language.trim() ? language.trim() : "Auto";
+  try {
+    const result = await sendRuntimeMessage({ type: "setRecognitionLanguage", language: nextLanguage });
+    state.dictation.language = result.language || nextLanguage;
+    await refreshDictationState();
+  } catch (_error) {
+    state.dictation.language = nextLanguage;
+  }
+  if (languageSelectEl) {
+    languageSelectEl.value = state.dictation.language || "Auto";
+  }
+  updateUI();
+}
+
 async function refreshDictationState() {
   try {
     const result = await sendRuntimeMessage({ type: "getDictationState" });
@@ -634,12 +730,17 @@ function initializePopup() {
     return;
   }
   popupInitialized = true;
+  populateRecognitionLanguageOptions();
 
   startBtn.addEventListener("click", () => {
     void startDictation();
   });
   stopBtn.addEventListener("click", () => {
     void stopDictation();
+  });
+  languageSelectEl?.addEventListener("change", (event) => {
+    const nextLanguage = event.target?.value || "Auto";
+    void setRecognitionLanguage(nextLanguage);
   });
   upgradeBtn.addEventListener("click", () => {
     void trackAnalyticsEvent("upgrade_clicked", { source: "header_button" });
@@ -719,7 +820,7 @@ function initializePopup() {
 
   void showWelcomeOnFirstLaunch();
   updateUI();
-  void Promise.all([loadAuthState(), loadSubscriptionStatus(), refreshDictationState()]).then(() => {
+  void Promise.all([loadAuthState(), loadSubscriptionStatus(), loadRecognitionLanguage(), refreshDictationState()]).then(() => {
     void autoOpenGoogleDocsIfNeeded();
     trackExtensionOpened();
   });
