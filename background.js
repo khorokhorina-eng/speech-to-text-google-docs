@@ -18,6 +18,11 @@ let subscriptionCache = {
   timestamp: 0,
 };
 
+let pricingPlansCache = {
+  plans: null,
+  timestamp: 0,
+};
+
 const tabStateCache = new Map();
 
 async function configureSidePanelBehavior() {
@@ -437,6 +442,25 @@ async function createCheckoutSession(planId, returnUrl) {
   };
 }
 
+async function getPricingPlans(forceRefresh = false) {
+  const now = Date.now();
+  if (!forceRefresh && pricingPlansCache.plans && now - pricingPlansCache.timestamp < SUBSCRIPTION_CACHE_MS) {
+    return pricingPlansCache.plans;
+  }
+
+  if (!isRemoteConfigured()) {
+    return [];
+  }
+
+  const data = await fetchJsonFromEndpoints("/plans");
+  const plans = Array.isArray(data?.plans) ? data.plans : [];
+  pricingPlansCache = {
+    plans,
+    timestamp: now,
+  };
+  return plans;
+}
+
 async function trackAnalyticsEvent(name, params = {}, sessionId = "") {
   const data = await fetchJsonFromEndpoints("/analytics/event", {
     method: "POST",
@@ -788,6 +812,13 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     createCheckoutSession(message.planId, message.returnUrl)
       .then((result) => sendResponse({ ok: true, ...result }))
       .catch((error) => sendResponse({ ok: false, error: error.message || "Failed to create checkout session." }));
+    return true;
+  }
+
+  if (message.type === "getPricingPlans") {
+    getPricingPlans(!!message.forceRefresh)
+      .then((plans) => sendResponse({ ok: true, plans }))
+      .catch((error) => sendResponse({ ok: false, error: error.message || "Failed to load pricing plans." }));
     return true;
   }
 

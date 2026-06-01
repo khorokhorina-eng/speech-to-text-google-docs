@@ -31,8 +31,8 @@
         <div class="price-grid">
           <article class="price-card">
             <h3>Monthly plan</h3>
-            <p class="price">$9.99</p>
-            <p class="price-note">per month</p>
+            <p id="monthlyPrice" class="price">$9.99</p>
+            <p id="monthlyPriceNote" class="price-note">per month</p>
             <ul class="list">
               <li>Unlimited dictation</li>
               <li>For regular Google Docs work</li>
@@ -41,8 +41,8 @@
           </article>
           <article class="price-card">
             <h3>Annual plan</h3>
-            <p class="price">$89.99</p>
-            <p class="price-note">per year</p>
+            <p id="annualPrice" class="price">$89.99</p>
+            <p id="annualPriceNote" class="price-note">per year</p>
             <ul class="list">
               <li>Unlimited dictation</li>
               <li>Best value for long-term use</li>
@@ -58,5 +58,31 @@
         through the extension and Stripe.
       </div>
     </footer>
+    <script>
+      async function loadPlans() {
+        try {
+          const response = await fetch("/plans");
+          if (!response.ok) {
+            return;
+          }
+          const data = await response.json();
+          const plans = Array.isArray(data && data.plans) ? data.plans : [];
+          const monthly = plans.find((plan) => plan.planId === "monthly");
+          const annual = plans.find((plan) => plan.planId === "annual");
+          if (monthly) {
+            if (monthly.displayPrice) document.getElementById("monthlyPrice").textContent = monthly.displayPrice;
+            if (monthly.periodLabel) document.getElementById("monthlyPriceNote").textContent = monthly.periodLabel;
+          }
+          if (annual) {
+            if (annual.displayPrice) document.getElementById("annualPrice").textContent = annual.displayPrice;
+            if (annual.periodLabel) document.getElementById("annualPriceNote").textContent = annual.periodLabel;
+          }
+        } catch (_error) {
+          // Keep the static fallback.
+        }
+      }
+
+      loadPlans();
+    </script>
   </body>
 </html>

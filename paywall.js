@@ -8,9 +8,16 @@ const authSignedInEl = document.getElementById("authSignedIn");
 const authGoogleBtn = document.getElementById("authGoogle");
 const authSignedInTextEl = document.getElementById("authSignedInText");
 const authSignOutBtn = document.getElementById("authSignOut");
+const monthlyPriceEl = document.getElementById("monthlyPrice");
+const monthlyPeriodEl = document.getElementById("monthlyPeriod");
+const monthlyDescEl = document.getElementById("monthlyDesc");
+const annualPriceEl = document.getElementById("annualPrice");
+const annualPeriodEl = document.getElementById("annualPeriod");
+const annualDescEl = document.getElementById("annualDesc");
 
 let currentSubscription = { active: false, plan: null };
 let authState = { signedIn: false, email: "", method: null };
+let pricingPlans = [];
 
 function getPlanLabel(plan) {
   const planId = plan?.planId || "";
@@ -57,6 +64,41 @@ function updateButtons() {
       ? "Upgrade"
       : "Sign in first";
   });
+}
+
+function getPricingPlan(planId) {
+  return pricingPlans.find((plan) => plan.planId === planId) || null;
+}
+
+function applyPricingPlan(planId, priceEl, periodEl, descEl) {
+  const plan = getPricingPlan(planId);
+  if (!plan) {
+    return;
+  }
+  if (priceEl && plan.displayPrice) {
+    priceEl.textContent = plan.displayPrice;
+  }
+  if (periodEl && plan.periodLabel) {
+    periodEl.textContent = plan.periodLabel;
+  }
+  if (descEl && plan.description) {
+    descEl.textContent = plan.description;
+  }
+}
+
+function updatePricingUI() {
+  applyPricingPlan("monthly", monthlyPriceEl, monthlyPeriodEl, monthlyDescEl);
+  applyPricingPlan("annual", annualPriceEl, annualPeriodEl, annualDescEl);
+}
+
+async function loadPricingPlans(forceRefresh = false) {
+  try {
+    const result = await sendMessage({ type: "getPricingPlans", forceRefresh });
+    pricingPlans = Array.isArray(result?.plans) ? result.plans : [];
+    updatePricingUI();
+  } catch (_error) {
+    pricingPlans = [];
+  }
 }
 
 async function loadAuthState() {
@@ -191,4 +233,5 @@ closeBtn.addEventListener("click", () => {
 });
 
 updateButtons();
+void loadPricingPlans();
 loadSubscriptionStatus();

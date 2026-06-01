@@ -14,6 +14,12 @@ const trialEndedNoticeEl = document.getElementById("trialEndedNotice");
 const trialUpgradeBtn = document.getElementById("trialUpgrade");
 const continueCheckoutMonthlyBtn = document.getElementById("continueCheckoutMonthly");
 const continueCheckoutAnnualBtn = document.getElementById("continueCheckoutAnnual");
+const monthlyDailyPriceEl = document.getElementById("monthlyDailyPrice");
+const monthlyDailyUnitEl = document.getElementById("monthlyDailyUnit");
+const monthlyBillingNoteEl = document.getElementById("monthlyBillingNote");
+const annualDailyPriceEl = document.getElementById("annualDailyPrice");
+const annualDailyUnitEl = document.getElementById("annualDailyUnit");
+const annualBillingNoteEl = document.getElementById("annualBillingNote");
 const authMessageEl = document.getElementById("authMessage");
 const authCopyEl = document.getElementById("authCopy");
 const authGoogleBtn = document.getElementById("authGoogle");
@@ -36,6 +42,7 @@ const backToReaderBtn = document.getElementById("backToReader");
 
 const ANALYTICS_SESSION_ID = `${Date.now()}_${Math.random().toString(16).slice(2, 10)}`;
 const FREE_TRIAL_SESSIONS = 15;
+const TRIAL_EXHAUSTED_EVENT_SENT_KEY = "trialExhaustedEventSent";
 const RECOGNITION_LANGUAGE_OPTIONS = [
   { value: "Auto", label: "Auto (browser language)" },
   { value: "am-ET", label: "Amharic" },
@@ -119,6 +126,7 @@ const state = {
     sessionsLeft: FREE_TRIAL_SESSIONS,
     freeTrialSessions: FREE_TRIAL_SESSIONS,
   },
+  pricingPlans: [],
 };
 
 const PLAN_META = {
@@ -149,6 +157,7 @@ let authReturnScreen = "paywall";
 let stopRequestInFlight = false;
 let stopStatePollTimer = null;
 let extensionOpenedTracked = false;
+let trialExhaustedEventSent = false;
 const DOCS_AUTO_OPEN_COOLDOWN_MS = 5000;
 
 function sendRuntimeMessage(message) {
@@ -323,6 +332,31 @@ function setPaywallStatus(text, ok = false) {
   paywallStatusEl.style.color = ok ? "#4d8b46" : "#72798b";
 }
 
+function getPricingPlan(planId) {
+  return state.pricingPlans.find((plan) => plan.planId === planId) || null;
+}
+
+function applyPricingPlan(planId, priceEl, unitEl, billingNoteEl) {
+  const plan = getPricingPlan(planId);
+  if (!plan) {
+    return;
+  }
+  if (priceEl && plan.dailyPrice) {
+    priceEl.textContent = plan.dailyPrice;
+  }
+  if (unitEl && plan.dailyUnit) {
+    unitEl.textContent = plan.dailyUnit;
+  }
+  if (billingNoteEl && plan.billingNote) {
+    billingNoteEl.textContent = plan.billingNote;
+  }
+}
+
+function updatePricingUI() {
+  applyPricingPlan("monthly", monthlyDailyPriceEl, monthlyDailyUnitEl, monthlyBillingNoteEl);
+  applyPricingPlan("annual", annualDailyPriceEl, annualDailyUnitEl, annualBillingNoteEl);
+}
+
 function updatePaywallButtons() {
   const activePlanId = state.subscription.plan?.planId || "";
   const monthlyCurrent = state.subscription.active && activePlanId === "monthly";
@@ -340,6 +374,16 @@ function updatePaywallButtons() {
     : "Sign in to subscribe";
   continueCheckoutMonthlyBtn.disabled = monthlyCurrent;
   continueCheckoutAnnualBtn.disabled = annualCurrent;
+}
+
+async function loadPricingPlans(forceRefresh = false) {
+  try {
+    const result = await sendRuntimeMessage({ type: "getPricingPlans", forceRefresh });
+    state.pricingPlans = Array.isArray(result?.plans) ? result.plans : [];
+    updatePricingUI();
+  } catch (_error) {
+    state.pricingPlans = [];
+  }
 }
 
 function updateAuthUI() {
@@ -415,7 +459,31 @@ function updateUI() {
   updateAuthUI();
   updateQuotaUI();
   updateDictationUI();
-  updatePaywallButtons();
+updatePaywallButtons();
+void loadPricingPlans();
+}
+
+async function maybeTrackTrialExhausted(source = "state_update") {
+  if (trialExhaustedEventSent || state.subscription.active || !isTrialEndedState()) {
+    return;
+  }
+
+  trialExhaustedEventSent = true;
+  await writeStorage({ [TRIAL_EXHAUSTED_EVENT_SENT_KEY]: true });
+  void trackAnalyticsEvent("trial_exhausted", {
+    source,
+    signed_in: state.auth.signedIn,
+    trial_sessions_left: Number(state.subscription.sessionsLeft || 0),
+  });
+}
+
+async function loadTrialExhaustedTrackingState() {
+  try {
+    const result = await readStorage({ [TRIAL_EXHAUSTED_EVENT_SENT_KEY]: false });
+    trialExhaustedEventSent = Boolean(result?.[TRIAL_EXHAUSTED_EVENT_SENT_KEY]);
+  } catch (_error) {
+    trialExhaustedEventSent = false;
+  }
 }
 
 async function loadAuthState() {
@@ -469,6 +537,7 @@ async function loadSubscriptionStatus() {
   }
 
   updateUI();
+  void maybeTrackTrialExhausted("subscription_status");
 }
 
 async function loadRecognitionLanguage() {
@@ -514,6 +583,7 @@ async function refreshDictationState() {
     };
   }
   updateUI();
+  void maybeTrackTrialExhausted("dictation_state");
 }
 
 async function startDictation() {
@@ -667,9 +737,10 @@ function openPaywall(source = "unknown") {
       setPaywallStatus(
         state.auth.signedIn
           ? "No active subscription detected."
-          : "Choose a plan and continue with Google."
+        : "Choose a plan and continue with Google."
       );
     }
+    void maybeTrackTrialExhausted("paywall_opened");
   });
 }
 
@@ -820,7 +891,13 @@ function initializePopup() {
 
   void showWelcomeOnFirstLaunch();
   updateUI();
-  void Promise.all([loadAuthState(), loadSubscriptionStatus(), loadRecognitionLanguage(), refreshDictationState()]).then(() => {
+  void Promise.all([
+    loadTrialExhaustedTrackingState(),
+    loadAuthState(),
+    loadSubscriptionStatus(),
+    loadRecognitionLanguage(),
+    refreshDictationState(),
+  ]).then(() => {
     void autoOpenGoogleDocsIfNeeded();
     trackExtensionOpened();
   });

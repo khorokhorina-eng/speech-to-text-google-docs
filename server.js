@@ -78,6 +78,11 @@ const STATE_PATH = path.join(__dirname, "auth-stripe-state.json");
 const GOOGLE_STATE_TTL_MS = 10 * 60 * 1000;
 
 const stripe = STRIPE_SECRET_KEY ? new Stripe(STRIPE_SECRET_KEY) : null;
+const PLAN_PRICING_CACHE_MS = 5 * 60 * 1000;
+let planPricingCache = {
+  timestamp: 0,
+  plans: null,
+};
 
 function roundUsageMinutes(value) {
   return Math.max(0, Math.round(Number(value || 0) * 100) / 100);
@@ -449,6 +454,92 @@ function getPlanById(planId) {
 
 function getPlanByStripePriceId(priceId) {
   return PLAN_DEFINITIONS.find((plan) => plan.stripePriceId === priceId) || null;
+}
+
+function formatCurrencyAmount(amountCents, currency = "usd") {
+  if (!Number.isFinite(Number(amountCents))) {
+    return "";
+  }
+  return new Intl.NumberFormat("en-US", {
+    style: "currency",
+    currency: String(currency || "usd").toUpperCase(),
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  }).format(Number(amountCents) / 100);
+}
+
+function getPlanPeriodMeta(interval = "") {
+  if (interval === "year") {
+    return {
+      perLabel: "per year",
+      billingLabel: "Billed annually",
+      dailyDivisor: 365,
+    };
+  }
+  return {
+    perLabel: "per month",
+    billingLabel: "Billed monthly",
+    dailyDivisor: 30,
+  };
+}
+
+async function resolvePricingPlans() {
+  const now = Date.now();
+  if (planPricingCache.plans && now - planPricingCache.timestamp < PLAN_PRICING_CACHE_MS) {
+    return planPricingCache.plans;
+  }
+
+  const plans = await Promise.all(
+    PLAN_DEFINITIONS.map(async (plan) => {
+      let amountCents = null;
+      let currency = "usd";
+      let interval = plan.id === "annual" ? "year" : "month";
+
+      if (stripe && plan.stripePriceId) {
+        try {
+          const stripePrice = await stripe.prices.retrieve(plan.stripePriceId);
+          amountCents = Number.isFinite(Number(stripePrice?.unit_amount))
+            ? Number(stripePrice.unit_amount)
+            : null;
+          currency = String(stripePrice?.currency || currency);
+          interval = String(stripePrice?.recurring?.interval || interval);
+        } catch (_error) {
+          amountCents = null;
+        }
+      }
+
+      const periodMeta = getPlanPeriodMeta(interval);
+      const dailyAmount =
+        amountCents !== null ? amountCents / 100 / periodMeta.dailyDivisor : null;
+
+      return {
+        planId: plan.id,
+        name: plan.name,
+        description: plan.description,
+        currency: currency.toUpperCase(),
+        amountCents,
+        amount: amountCents !== null ? amountCents / 100 : null,
+        displayPrice: amountCents !== null ? formatCurrencyAmount(amountCents, currency) : "",
+        periodLabel: periodMeta.perLabel,
+        billingNote:
+          amountCents !== null
+            ? `${periodMeta.billingLabel} ${formatCurrencyAmount(amountCents, currency)} ${interval === "year" ? "/ year" : "/ month"}`
+            : "",
+        dailyPrice:
+          dailyAmount !== null
+            ? `${formatCurrencyAmount(dailyAmount * 100, currency).replace(/\.00$/, "")}`
+            : "",
+        dailyUnit: "/day",
+        interval,
+      };
+    })
+  );
+
+  planPricingCache = {
+    timestamp: now,
+    plans,
+  };
+  return plans;
 }
 
 function getDeviceToken(req, parsedUrl, body) {
@@ -1398,6 +1489,15 @@ async function handleSubscriptionStatus(req, res, parsedUrl) {
   }
 }
 
+async function handlePlans(_req, res) {
+  try {
+    const plans = await resolvePricingPlans();
+    sendJson(res, 200, { plans });
+  } catch (error) {
+    sendJson(res, 500, { error: error.message || "Failed to load plans." });
+  }
+}
+
 async function handleStripeWebhook(req, res) {
   if (!ensureStripeConfigured(res)) {
     return;
@@ -1541,33 +1641,6 @@ async function handleSuccessPage(res, parsedUrl) {
   const returnUrl =
     sanitizeReturnUrl(parsedUrl.searchParams.get("return_url") || "") ||
     sanitizeReturnUrl(mappedReturnUrl);
-  let purchase = null;
-
-  if (stripe && sessionId) {
-    try {
-      const session = await stripe.checkout.sessions.retrieve(sessionId);
-      const planId =
-        session.metadata?.planId ||
-        session.subscription_details?.metadata?.planId ||
-        "speech-to-text-google-docs-plan";
-      purchase = {
-        transaction_id: String(session.id),
-        value: Number(session.amount_total || 0) / 100,
-        currency: String(session.currency || "usd").toUpperCase(),
-        items: [
-          {
-            item_id: String(planId),
-            item_name: getPlanById(planId)?.name || "Speech to Text Google Docs plan",
-            price: Number(session.amount_total || 0) / 100,
-            quantity: 1,
-          },
-        ],
-      };
-    } catch (_error) {
-      purchase = null;
-    }
-  }
-
   sendHtml(
       res,
       200,
@@ -1575,12 +1648,7 @@ async function handleSuccessPage(res, parsedUrl) {
       "Payment successful",
       "Unlimited dictation is active on this account. Return to the extension to keep working.",
       returnUrl,
-      purchase
-        ? {
-            name: "purchase",
-            params: purchase,
-          }
-        : null
+      null
     )
   );
 }
@@ -1618,6 +1686,11 @@ const server = http.createServer(async (req, res) => {
 
   if (req.method === "GET" && parsedUrl.pathname === "/me") {
     await handleAuthMe(req, res, parsedUrl);
+    return;
+  }
+
+  if (req.method === "GET" && parsedUrl.pathname === "/plans") {
+    await handlePlans(req, res, parsedUrl);
     return;
   }
 
