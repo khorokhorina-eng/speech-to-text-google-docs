@@ -1109,6 +1109,32 @@ function focusGoogleDocsSurface() {
   return null;
 }
 
+function hydrateCursorReadyState() {
+  bindIframeListeners();
+
+  if (lastFocusedTarget?.isConnected) {
+    rememberFocusedTarget(lastFocusedTarget);
+    return;
+  }
+
+  const iframeBody = getIframeBody();
+  if (iframeBody) {
+    rememberFocusedTarget(iframeBody);
+    return;
+  }
+
+  const active = document.activeElement;
+  if (active instanceof HTMLElement && isValidInsertionTarget(active)) {
+    rememberFocusedTarget(active);
+    return;
+  }
+
+  const editable = document.querySelector('[contenteditable="true"]');
+  if (editable instanceof HTMLElement) {
+    rememberFocusedTarget(editable);
+  }
+}
+
 function ensureCollapsedSelection(target) {
   const ownerDocument = target.ownerDocument || document;
   const ownerWindow = ownerDocument.defaultView || window;
@@ -1630,6 +1656,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   }
 
   if (message.type === "getDictationState") {
+    hydrateCursorReadyState();
     sendResponse({
       ok: true,
       state: {
@@ -1671,4 +1698,5 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
 });
 
 applyRecognitionLanguage("Auto", { skipUpdate: true });
+hydrateCursorReadyState();
 sendStateUpdate();

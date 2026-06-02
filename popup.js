@@ -493,8 +493,6 @@ function updateDictationUI() {
     startDisabledReason = "docs";
   } else if (!dictation.supported) {
     startDisabledReason = "unsupported";
-  } else if (!isRunning && dictation.status === "idle" && !dictation.cursorReady) {
-    startDisabledReason = "cursor";
   }
 
   startBtn.disabled = Boolean(startDisabledReason) || isRunning;
@@ -507,11 +505,7 @@ function updateDictationUI() {
   recordingTipsEl?.classList.toggle("hidden", !isRunning);
 
   if (!isRunning) {
-    if (startDisabledReason === "cursor") {
-      startBtn.textContent = "Click in document first";
-    } else {
-      startBtn.textContent = "Start recording";
-    }
+    startBtn.textContent = "Start recording";
   }
 
   trialEndedNoticeEl.classList.toggle("hidden", !trialEnded);
@@ -519,14 +513,11 @@ function updateDictationUI() {
   languageCardEl?.classList.toggle("hidden", trialEnded);
   readerControlsEl?.classList.toggle("hidden", trialEnded || !dictation.isDocsPage);
   documentCardEl?.classList.toggle("hidden", !dictation.isDocsPage && !trialEnded);
-  actionHintEl?.classList.toggle(
-    "hidden",
-    !(startDisabledReason === "cursor")
-  );
+  actionHintEl?.classList.toggle("hidden", !(dictation.isDocsPage && !isRunning && !dictation.cursorReady));
 
   if (actionHintEl) {
     actionHintEl.textContent =
-      startDisabledReason === "cursor"
+      dictation.isDocsPage && !isRunning && !dictation.cursorReady
         ? "Click inside the document first so the extension knows where to insert text."
         : "";
   }
@@ -538,7 +529,7 @@ function updateDictationUI() {
     hintEl.textContent = "Opening Google Docs...";
     void autoOpenGoogleDocsIfNeeded();
   } else if (dictation.status === "idle" && !dictation.cursorReady) {
-    hintEl.textContent = "Click inside Google Docs first, then start dictation.";
+    hintEl.textContent = "If text is not inserted in the right place, click inside the document first.";
   }
 }
 
@@ -1039,6 +1030,7 @@ function initializePopup() {
 
   void showWelcomeOnFirstLaunch();
   updateUI();
+  void autoOpenGoogleDocsIfNeeded();
   void Promise.all([
     loadTrialExhaustedTrackingState(),
     loadAuthState(),

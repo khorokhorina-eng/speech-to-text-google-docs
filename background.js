@@ -551,6 +551,18 @@ function queryActiveTab() {
   });
 }
 
+function queryTabs(queryInfo) {
+  return new Promise((resolve, reject) => {
+    chrome.tabs.query(queryInfo, (tabs) => {
+      if (chrome.runtime.lastError) {
+        reject(new Error(chrome.runtime.lastError.message));
+        return;
+      }
+      resolve(Array.isArray(tabs) ? tabs : []);
+    });
+  });
+}
+
 function activateTab(tabId, windowId) {
   return new Promise((resolve, reject) => {
     chrome.tabs.update(tabId, { active: true }, (tab) => {
@@ -651,17 +663,20 @@ async function nativeTypeTextInTab(tabId, windowId, text) {
 }
 
 async function getActiveDocsTab() {
-  const tab = await queryActiveTab();
-  if (!tab?.id) {
-    throw new Error("No active tab found.");
+  const activeTab = await queryActiveTab().catch(() => null);
+  const activeUrl = typeof activeTab?.url === "string" ? activeTab.url : "";
+  if (activeTab?.id && activeUrl.startsWith("https://docs.google.com/document/")) {
+    return activeTab;
   }
 
-  const url = typeof tab.url === "string" ? tab.url : "";
-  if (!url.startsWith("https://docs.google.com/document/")) {
+  const docsTabs = await queryTabs({ url: "https://docs.google.com/document/*" }).catch(() => []);
+  const reusableTab = docsTabs.find((tab) => tab.active) || docsTabs[0] || null;
+  if (!reusableTab?.id) {
     throw new Error("Open a Google Docs document first.");
   }
 
-  return tab;
+  await activateTab(reusableTab.id, reusableTab.windowId).catch(() => null);
+  return reusableTab;
 }
 
 function sendMessageToTab(tabId, message) {
@@ -785,6 +800,14 @@ async function stopDictation() {
 }
 
 async function openGoogleDocs() {
+  const existingTabs = await queryTabs({ url: "https://docs.google.com/document/*" }).catch(() => []);
+  const reusableTab = existingTabs.find((tab) => tab.active) || existingTabs[0] || null;
+
+  if (reusableTab?.id) {
+    await activateTab(reusableTab.id, reusableTab.windowId).catch(() => null);
+    return { opened: true, reused: true, tabId: reusableTab.id };
+  }
+
   const createdTab = await chrome.tabs.create({ url: "https://docs.google.com/document/create" });
   return { opened: true, reused: false, tabId: createdTab?.id || null };
 }
