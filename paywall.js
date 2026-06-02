@@ -25,7 +25,16 @@ let currentSubscription = { active: false, plan: null };
 let authState = { signedIn: false, email: "", method: null };
 let pricingPlans = [];
 
-function getSafeReturnUrl() {
+async function getSafeReturnUrl() {
+  try {
+    const result = await sendMessage({ type: "getPreferredReturnUrl" });
+    const url = typeof result?.returnUrl === "string" ? result.returnUrl.trim() : "";
+    if (url.startsWith("https://docs.google.com/document/")) {
+      return url;
+    }
+  } catch (_error) {
+    // Fall back below.
+  }
   return "https://docs.google.com/document/create";
 }
 
@@ -155,7 +164,7 @@ async function signInWithGoogle() {
   try {
     await sendMessage({
       type: "startGoogleSignIn",
-      returnUrl: getSafeReturnUrl(),
+      returnUrl: await getSafeReturnUrl(),
     });
     setStatus("Complete Google sign-in in the opened tab, then refresh this page.");
   } catch (error) {
@@ -201,7 +210,7 @@ async function openCheckout(planId, button) {
     const result = await sendMessage({
       type: "createCheckoutSession",
       planId,
-      returnUrl: getSafeReturnUrl(),
+      returnUrl: await getSafeReturnUrl(),
     });
 
     if (!result.url) {
@@ -235,7 +244,7 @@ async function openBillingPortal() {
   try {
     const result = await sendMessage({
       type: "createBillingPortalSession",
-      returnUrl: "https://docs.google.com/document/",
+      returnUrl: await getSafeReturnUrl(),
     });
     if (!result.url) {
       throw new Error("Billing portal URL is missing.");
@@ -261,8 +270,16 @@ async function loadSubscriptionStatus() {
     managePanelEl.hidden = !currentSubscription.active;
     monthlyPlanCardEl.hidden = currentSubscription.active;
     annualPlanCardEl.hidden = currentSubscription.active;
+    const pageTitleEl = document.querySelector("h1");
+    const pageSubtitleEl = document.querySelector(".muted");
 
     if (currentSubscription.active) {
+      if (pageTitleEl) {
+        pageTitleEl.textContent = "Subscription active";
+      }
+      if (pageSubtitleEl) {
+        pageSubtitleEl.textContent = "Manage your plan for Google Docs dictation.";
+      }
       const endLabel = formatPlanDateLabel(currentSubscription.plan?.currentPeriodEnd);
       manageMessageEl.textContent =
         currentSubscription.plan?.cancelAtPeriodEnd && endLabel
@@ -270,6 +287,13 @@ async function loadSubscriptionStatus() {
           : endLabel
           ? `Your ${getPlanLabel(currentSubscription.plan).toLowerCase()} renews on ${endLabel}.`
           : "Your paid plan is active on this account.";
+    } else {
+      if (pageTitleEl) {
+        pageTitleEl.textContent = "Your trial is over";
+      }
+      if (pageSubtitleEl) {
+        pageSubtitleEl.textContent = "Keep dictating in Google Docs without limits.";
+      }
     }
 
     if (currentSubscription.active) {

@@ -28,7 +28,7 @@ How it works:
 
 Account and billing:
 
-- includes 15 free sessions
+- includes 10 free dictations
 - continued use requires a paid plan
 - Google sign-in is required before checkout
 - billing is handled through Stripe
