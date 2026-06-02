@@ -1080,6 +1080,17 @@ function showTranscriptOverlay(text) {
   }
 }
 
+function updateLiveTranscriptPreview() {
+  const confirmed = String(state.transcript || "").trim();
+  const interim = String(state.interimTranscript || "").trim();
+  const preview = [confirmed, interim].filter(Boolean).join(confirmed && interim ? " " : "");
+  if (!preview) {
+    removeTranscriptOverlay();
+    return;
+  }
+  showTranscriptOverlay(preview);
+}
+
 function focusGoogleDocsSurface() {
   bindIframeListeners();
 
@@ -1499,6 +1510,11 @@ function createRecognition() {
 
     state.interimTranscript = interim.trim();
     pendingInterimText = state.interimTranscript;
+    if (state.interimTranscript) {
+      updateLiveTranscriptPreview();
+    } else if (!state.transcript) {
+      removeTranscriptOverlay();
+    }
     sendStateUpdate();
   };
 
