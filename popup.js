@@ -15,6 +15,8 @@ const upgradeBtn = document.getElementById("upgrade");
 const contactBtn = document.getElementById("contact");
 const accountActionBtn = document.getElementById("accountAction");
 const paywallStatusEl = document.getElementById("paywallStatus");
+const paywallTitleEl = document.querySelector(".paywall-title");
+const paywallCopyStrongEl = document.querySelector(".paywall-copy-strong");
 const trialEndedNoticeEl = document.getElementById("trialEndedNotice");
 const trialUpgradeBtn = document.getElementById("trialUpgrade");
 const continueCheckoutMonthlyBtn = document.getElementById("continueCheckoutMonthly");
@@ -576,6 +578,14 @@ function updateUI() {
   updateQuotaUI();
   updateDictationUI();
   updatePaywallButtons();
+  if (paywallTitleEl) {
+    paywallTitleEl.textContent = state.subscription.active ? "Subscription active" : "Your trial is over";
+  }
+  if (paywallCopyStrongEl) {
+    paywallCopyStrongEl.textContent = state.subscription.active
+      ? "Manage your plan for Google Docs dictation"
+      : "Keep dictating in Google Docs without limits";
+  }
   activeSubscriptionPanelEl?.classList.toggle("hidden", !state.subscription.active);
   monthlyPlanCardEl?.classList.toggle("hidden", state.subscription.active);
   annualPlanCardEl?.classList.toggle("hidden", state.subscription.active);
