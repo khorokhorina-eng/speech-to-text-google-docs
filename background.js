@@ -248,6 +248,23 @@ async function startGoogleSignIn(returnUrl) {
   return { started: true, deviceToken, tabId: createdTab?.id || null, reused: false };
 }
 
+async function getPreferredReturnUrl() {
+  const activeTab = await queryActiveTab().catch(() => null);
+  const activeUrl = typeof activeTab?.url === "string" ? activeTab.url.trim() : "";
+  if (activeUrl.startsWith("https://docs.google.com/document/")) {
+    return activeUrl;
+  }
+
+  const docsTabs = await queryTabs({ url: "https://docs.google.com/document/*" }).catch(() => []);
+  const reusableTab = docsTabs.find((tab) => tab.active) || docsTabs[0] || null;
+  const docsUrl = typeof reusableTab?.url === "string" ? reusableTab.url.trim() : "";
+  if (docsUrl.startsWith("https://docs.google.com/document/")) {
+    return docsUrl;
+  }
+
+  return "https://docs.google.com/document/create";
+}
+
 function getDefaultLocalTrialState() {
   return {
     sessionsLeft: FREE_TRIAL_SESSIONS,
@@ -930,6 +947,13 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     getRecognitionLanguageSetting()
       .then((language) => sendResponse({ ok: true, language }))
       .catch((error) => sendResponse({ ok: false, error: error.message || "Failed to read language." }));
+    return true;
+  }
+
+  if (message.type === "getPreferredReturnUrl") {
+    getPreferredReturnUrl()
+      .then((returnUrl) => sendResponse({ ok: true, returnUrl }))
+      .catch((error) => sendResponse({ ok: false, error: error.message || "Failed to resolve return URL." }));
     return true;
   }
 

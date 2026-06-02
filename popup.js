@@ -229,12 +229,9 @@ function writeStorage(payload) {
 
 async function getReturnUrlForAuth() {
   try {
-    const tabs = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
-    const url = tabs?.[0]?.url || "";
-    if (
-      typeof url === "string" &&
-      (url.startsWith("https://docs.google.com/document/") || url.startsWith("https://docs.google.com/document/create"))
-    ) {
+    const result = await sendRuntimeMessage({ type: "getPreferredReturnUrl" });
+    const url = result?.returnUrl || "";
+    if (typeof url === "string" && url.startsWith("https://docs.google.com/document/")) {
       return url;
     }
   } catch (_error) {
@@ -555,8 +552,12 @@ function updateDictationUI() {
     startBtn.disabled = false;
     hintEl.textContent = "Opening Google Docs...";
     void autoOpenGoogleDocsIfNeeded();
+  } else if (dictation.status === "starting") {
+    hintEl.textContent = "Microphone is on. The first words can take a moment to appear.";
   } else if (dictation.status === "idle" && !dictation.cursorReady) {
     hintEl.textContent = "If text is not inserted in the right place, click inside the document first.";
+  } else if (dictation.status === "listening" && !dictation.transcript && !dictation.interimTranscript) {
+    hintEl.textContent = "Listening now. Start speaking normally.";
   }
 }
 
