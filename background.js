@@ -674,7 +674,6 @@ async function nativeTypeTextInTab(tabId, windowId, text) {
     throw new Error("Nothing to insert.");
   }
 
-  await activateTab(tabId, windowId).catch(() => null);
   const target = { tabId };
   await attachDebugger(target);
 
@@ -713,7 +712,6 @@ async function nativeDeleteTextInTab(tabId, windowId, count) {
     return { deleted: true, count: 0 };
   }
 
-  await activateTab(tabId, windowId).catch(() => null);
   const target = { tabId };
   await attachDebugger(target);
 
@@ -735,39 +733,6 @@ async function nativeDeleteTextInTab(tabId, windowId, count) {
       });
     }
 
-    return { deleted: true, count: normalizedCount };
-  } finally {
-    await detachDebugger(target).catch(() => null);
-  }
-}
-
-async function nativeDeleteTextInTab(tabId, windowId, count) {
-  const normalizedCount = Math.max(0, Math.floor(Number(count) || 0));
-  if (!normalizedCount) {
-    return { deleted: true, count: 0 };
-  }
-
-  await activateTab(tabId, windowId).catch(() => null);
-  const target = { tabId };
-  await attachDebugger(target);
-
-  try {
-    for (let index = 0; index < normalizedCount; index += 1) {
-      await sendDebuggerCommand(target, "Input.dispatchKeyEvent", {
-        type: "rawKeyDown",
-        key: "Backspace",
-        code: "Backspace",
-        windowsVirtualKeyCode: 8,
-        nativeVirtualKeyCode: 8,
-      });
-      await sendDebuggerCommand(target, "Input.dispatchKeyEvent", {
-        type: "keyUp",
-        key: "Backspace",
-        code: "Backspace",
-        windowsVirtualKeyCode: 8,
-        nativeVirtualKeyCode: 8,
-      });
-    }
     return { deleted: true, count: normalizedCount };
   } finally {
     await detachDebugger(target).catch(() => null);
