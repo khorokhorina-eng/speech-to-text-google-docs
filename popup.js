@@ -165,6 +165,7 @@ let activeScreen = "reader";
 let isAuthenticating = false;
 let authSuccessToastTimer = null;
 let authPollingTimer = null;
+let authTimeoutTimer = null;
 let authReturnScreen = "paywall";
 let stopRequestInFlight = false;
 let stopStatePollTimer = null;
@@ -308,6 +309,10 @@ function closeDrawer() {
 function setAuthenticating(nextValue) {
   isAuthenticating = Boolean(nextValue);
   authOverlayEl.classList.toggle("hidden", !isAuthenticating);
+  if (authTimeoutTimer) {
+    clearTimeout(authTimeoutTimer);
+    authTimeoutTimer = null;
+  }
   if (authPollingTimer) {
     clearInterval(authPollingTimer);
     authPollingTimer = null;
@@ -317,6 +322,10 @@ function setAuthenticating(nextValue) {
       void loadAuthState();
       void loadSubscriptionStatus();
     }, 1500);
+    authTimeoutTimer = setTimeout(() => {
+      setAuthenticating(false);
+      setPaywallStatus("Complete Google sign-in in the opened tab, then reopen the extension if needed.");
+    }, 30000);
   }
 }
 
@@ -1014,19 +1023,24 @@ function initializePopup() {
     }
   });
 
+  async function refreshVisibleState() {
+    await Promise.allSettled([
+      refreshDictationState(),
+      loadAuthState(),
+      loadSubscriptionStatus(),
+    ]);
+    await autoOpenGoogleDocsIfNeeded();
+  }
+
   window.addEventListener("focus", () => {
-    void refreshDictationState().then(() => {
-      void autoOpenGoogleDocsIfNeeded();
-    });
+    void refreshVisibleState();
   });
 
   document.addEventListener("visibilitychange", () => {
     if (document.visibilityState !== "visible") {
       return;
     }
-    void refreshDictationState().then(() => {
-      void autoOpenGoogleDocsIfNeeded();
-    });
+    void refreshVisibleState();
   });
 
   void showWelcomeOnFirstLaunch();
