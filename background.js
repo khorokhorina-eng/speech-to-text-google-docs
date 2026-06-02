@@ -696,6 +696,73 @@ async function nativeTypeTextInTab(tabId, windowId, text) {
   }
 }
 
+async function nativeDeleteTextInTab(tabId, windowId, count) {
+  const normalizedCount = Math.max(0, Math.floor(Number(count) || 0));
+  if (!normalizedCount) {
+    return { deleted: true, count: 0 };
+  }
+
+  await activateTab(tabId, windowId).catch(() => null);
+  const target = { tabId };
+  await attachDebugger(target);
+
+  try {
+    for (let index = 0; index < normalizedCount; index += 1) {
+      await sendDebuggerCommand(target, "Input.dispatchKeyEvent", {
+        type: "rawKeyDown",
+        key: "Backspace",
+        code: "Backspace",
+        windowsVirtualKeyCode: 8,
+        nativeVirtualKeyCode: 8,
+      });
+      await sendDebuggerCommand(target, "Input.dispatchKeyEvent", {
+        type: "keyUp",
+        key: "Backspace",
+        code: "Backspace",
+        windowsVirtualKeyCode: 8,
+        nativeVirtualKeyCode: 8,
+      });
+    }
+
+    return { deleted: true, count: normalizedCount };
+  } finally {
+    await detachDebugger(target).catch(() => null);
+  }
+}
+
+async function nativeDeleteTextInTab(tabId, windowId, count) {
+  const normalizedCount = Math.max(0, Math.floor(Number(count) || 0));
+  if (!normalizedCount) {
+    return { deleted: true, count: 0 };
+  }
+
+  await activateTab(tabId, windowId).catch(() => null);
+  const target = { tabId };
+  await attachDebugger(target);
+
+  try {
+    for (let index = 0; index < normalizedCount; index += 1) {
+      await sendDebuggerCommand(target, "Input.dispatchKeyEvent", {
+        type: "rawKeyDown",
+        key: "Backspace",
+        code: "Backspace",
+        windowsVirtualKeyCode: 8,
+        nativeVirtualKeyCode: 8,
+      });
+      await sendDebuggerCommand(target, "Input.dispatchKeyEvent", {
+        type: "keyUp",
+        key: "Backspace",
+        code: "Backspace",
+        windowsVirtualKeyCode: 8,
+        nativeVirtualKeyCode: 8,
+      });
+    }
+    return { deleted: true, count: normalizedCount };
+  } finally {
+    await detachDebugger(target).catch(() => null);
+  }
+}
+
 async function getActiveDocsTab() {
   const activeTab = await queryActiveTab().catch(() => null);
   const activeUrl = typeof activeTab?.url === "string" ? activeTab.url : "";
@@ -995,6 +1062,34 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       .then((result) => sendResponse({ ok: true, ...result }))
       .catch((error) =>
         sendResponse({ ok: false, error: error.message || "Failed to type text into Google Docs." })
+      );
+    return true;
+  }
+
+  if (message.type === "nativeDeleteText") {
+    if (!sender.tab?.id) {
+      sendResponse({ ok: false, error: "No Google Docs tab is attached to this request." });
+      return false;
+    }
+
+    nativeDeleteTextInTab(sender.tab.id, sender.tab.windowId, message.count)
+      .then((result) => sendResponse({ ok: true, ...result }))
+      .catch((error) =>
+        sendResponse({ ok: false, error: error.message || "Failed to delete text in Google Docs." })
+      );
+    return true;
+  }
+
+  if (message.type === "nativeDeleteText") {
+    if (!sender.tab?.id) {
+      sendResponse({ ok: false, error: "No Google Docs tab is attached to this request." });
+      return false;
+    }
+
+    nativeDeleteTextInTab(sender.tab.id, sender.tab.windowId, message.count)
+      .then((result) => sendResponse({ ok: true, ...result }))
+      .catch((error) =>
+        sendResponse({ ok: false, error: error.message || "Failed to delete text in Google Docs." })
       );
     return true;
   }

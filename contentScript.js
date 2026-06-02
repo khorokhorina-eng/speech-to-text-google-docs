@@ -788,6 +788,7 @@ let selectedRecognitionLanguage = "Auto";
 let activeVoiceCommands = buildVoiceCommands(navigator.language || "en-US");
 let pendingReadyCue = false;
 let readyCueAudioContext = null;
+let liveInterimInsertedText = "";
 
 function resolveRecognitionLanguage(language) {
   const normalized = typeof language === "string" && language.trim() ? language.trim() : "Auto";
@@ -1354,6 +1355,54 @@ async function insertTextIntoGoogleDocs(text, rawText = "") {
   return insertTextIntoDocument(normalizedTranscript, rawText);
 }
 
+async function removeLiveInterimText() {
+  const current = liveInterimInsertedText;
+  if (!current) {
+    return true;
+  }
+
+  liveInterimInsertedText = "";
+
+  try {
+    const response = await sendRuntimeMessage({
+      type: "nativeDeleteText",
+      count: Array.from(current).length,
+    });
+    return Boolean(response?.deleted);
+  } catch (_error) {
+    return false;
+  }
+}
+
+async function syncLiveInterimText(text) {
+  const normalizedTranscript = normalizeTranscriptChunk(text);
+  const nextText = normalizedTranscript ? `${normalizedTranscript} ` : "";
+
+  if (nextText === liveInterimInsertedText) {
+    return;
+  }
+
+  if (liveInterimInsertedText) {
+    await removeLiveInterimText().catch(() => null);
+  }
+
+  if (!nextText) {
+    return;
+  }
+
+  try {
+    const response = await sendRuntimeMessage({
+      type: "nativeTypeText",
+      text: nextText,
+    });
+    if (response?.inserted) {
+      liveInterimInsertedText = nextText;
+    }
+  } catch (_error) {
+    // Best effort only. Final insertion path remains authoritative.
+  }
+}
+
 async function handleRecognizedText(text) {
   const normalizedTranscript = normalizeTranscriptChunk(text);
   if (!normalizedTranscript) {
@@ -1365,6 +1414,7 @@ async function handleRecognizedText(text) {
     return;
   }
 
+  await removeLiveInterimText().catch(() => null);
   const inserted = await insertTextIntoGoogleDocs(normalizedTranscript, text);
   if (!inserted) {
     state.transcript = `${state.transcript} ${normalizedTranscript}`.trim();
@@ -1402,6 +1452,7 @@ function queueRecognizedText(text) {
 
 function flushPendingInterimText() {
   const pending = normalizeTranscriptChunk(pendingInterimText || state.interimTranscript || "");
+  void removeLiveInterimText();
   pendingInterimText = "";
   state.interimTranscript = "";
   sendStateUpdate();
@@ -1511,8 +1562,10 @@ function createRecognition() {
     state.interimTranscript = interim.trim();
     pendingInterimText = state.interimTranscript;
     if (state.interimTranscript) {
+      void syncLiveInterimText(state.interimTranscript);
       updateLiveTranscriptPreview();
     } else if (!state.transcript) {
+      void removeLiveInterimText();
       removeTranscriptOverlay();
     }
     sendStateUpdate();
@@ -1521,6 +1574,7 @@ function createRecognition() {
   next.onerror = (event) => {
     const code = String(event?.error || "");
     if (code === "no-speech") {
+      void removeLiveInterimText();
       pendingInterimText = "";
       state.interimTranscript = "";
       sendStateUpdate();
