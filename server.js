@@ -1346,22 +1346,12 @@ async function handleGoogleCallback(_req, res, parsedUrl) {
       ? " This Google account already used part of the free trial, so your remaining free dictations were updated."
       : "";
 
-    sendHtml(
-      res,
-      200,
-      renderAuthCompletePage(
-        "Google sign-in complete",
-        `Signed in as ${account.email}.${trialMessage}`,
-        pending.returnUrl,
-        {
-          name: "login",
-          params: {
-            method: "Google",
-            destination: "speech_to_text_google_docs_extension",
-          },
-        }
-      )
-    );
+    const completeUrl = new URL(getPublicUrl("/reg-complete"));
+    completeUrl.searchParams.set("message", `Signed in as ${account.email}.${trialMessage}`);
+    if (pending.returnUrl) {
+      completeUrl.searchParams.set("return_url", pending.returnUrl);
+    }
+    redirect(res, completeUrl.toString());
   } catch (error) {
     delete state.googleStates[oauthState];
     writeState(state);
@@ -1371,6 +1361,22 @@ async function handleGoogleCallback(_req, res, parsedUrl) {
       renderAuthCompletePage("Google sign-in failed", error.message || "Unable to sign in.")
     );
   }
+}
+
+function handleRegistrationComplete(res, parsedUrl) {
+  const returnUrl = sanitizeReturnUrl(parsedUrl.searchParams.get("return_url") || "");
+  const message = parsedUrl.searchParams.get("message") || "Signed in successfully.";
+  sendHtml(
+    res,
+    200,
+    renderAuthCompletePage("Login is successful", message, returnUrl, {
+      name: "login",
+      params: {
+        method: "Google",
+        destination: "speech_to_text_google_docs_extension",
+      },
+    })
+  );
 }
 
 async function handleAuthLogout(req, res, parsedUrl) {
@@ -1997,6 +2003,11 @@ const server = http.createServer(async (req, res) => {
 
   if (req.method === "GET" && parsedUrl.pathname === "/auth/google/callback") {
     await handleGoogleCallback(req, res, parsedUrl);
+    return;
+  }
+
+  if (req.method === "GET" && parsedUrl.pathname === "/reg-complete") {
+    handleRegistrationComplete(res, parsedUrl);
     return;
   }
 
