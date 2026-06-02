@@ -239,8 +239,13 @@ async function startGoogleSignIn(returnUrl) {
   if (typeof returnUrl === "string" && returnUrl.trim()) {
     target.searchParams.set("return_url", returnUrl.trim());
   }
-  await chrome.tabs.create({ url: target.toString() });
-  return { started: true, deviceToken };
+  const activeTab = await queryActiveTab().catch(() => null);
+  if (activeTab?.id) {
+    await updateTabUrl(activeTab.id, target.toString());
+    return { started: true, deviceToken, tabId: activeTab.id, reused: true };
+  }
+  const createdTab = await chrome.tabs.create({ url: target.toString() });
+  return { started: true, deviceToken, tabId: createdTab?.id || null, reused: false };
 }
 
 function getDefaultLocalTrialState() {
@@ -563,6 +568,18 @@ function queryTabs(queryInfo) {
   });
 }
 
+function updateTabUrl(tabId, url) {
+  return new Promise((resolve, reject) => {
+    chrome.tabs.update(tabId, { url, active: true }, (tab) => {
+      if (chrome.runtime.lastError) {
+        reject(new Error(chrome.runtime.lastError.message));
+        return;
+      }
+      resolve(tab || null);
+    });
+  });
+}
+
 function activateTab(tabId, windowId) {
   return new Promise((resolve, reject) => {
     chrome.tabs.update(tabId, { active: true }, (tab) => {
@@ -806,6 +823,12 @@ async function openGoogleDocs() {
   if (reusableTab?.id) {
     await activateTab(reusableTab.id, reusableTab.windowId).catch(() => null);
     return { opened: true, reused: true, tabId: reusableTab.id };
+  }
+
+  const activeTab = await queryActiveTab().catch(() => null);
+  if (activeTab?.id) {
+    await updateTabUrl(activeTab.id, "https://docs.google.com/document/create");
+    return { opened: true, reused: true, tabId: activeTab.id };
   }
 
   const createdTab = await chrome.tabs.create({ url: "https://docs.google.com/document/create" });

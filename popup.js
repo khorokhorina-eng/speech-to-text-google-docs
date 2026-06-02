@@ -173,6 +173,23 @@ let extensionOpenedTracked = false;
 let trialExhaustedEventSent = false;
 const DOCS_AUTO_OPEN_COOLDOWN_MS = 5000;
 
+async function navigateActiveTabOrOpen(url) {
+  if (!url) {
+    return;
+  }
+  try {
+    const tabs = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
+    const activeTab = tabs?.[0] || null;
+    if (activeTab?.id) {
+      await chrome.tabs.update(activeTab.id, { url, active: true });
+      return;
+    }
+  } catch (_error) {
+    // Fallback to creating a new tab.
+  }
+  await chrome.tabs.create({ url });
+}
+
 function sendRuntimeMessage(message) {
   return new Promise((resolve, reject) => {
     chrome.runtime.sendMessage(message, (response) => {
@@ -781,7 +798,7 @@ async function autoOpenGoogleDocsIfNeeded() {
   try {
     await sendRuntimeMessage({ type: "openGoogleDocs" });
   } catch (_error) {
-    chrome.tabs.create({ url: "https://docs.google.com/document/create" });
+    await navigateActiveTabOrOpen("https://docs.google.com/document/create");
   }
 }
 
@@ -876,7 +893,7 @@ async function openCheckout(planId, button) {
     if (!result.url) {
       throw new Error("Checkout URL is missing.");
     }
-    chrome.tabs.create({ url: result.url });
+    await navigateActiveTabOrOpen(result.url);
     setPaywallStatus("Stripe Checkout opened in a new tab.", true);
   } catch (error) {
     setPaywallStatus(error.message || "Unable to open checkout.");
@@ -910,8 +927,8 @@ async function openBillingPortal() {
     if (!result.url) {
       throw new Error("Billing portal URL is missing.");
     }
-    chrome.tabs.create({ url: result.url });
-    setPaywallStatus("Stripe billing portal opened in a new tab.", true);
+    await navigateActiveTabOrOpen(result.url);
+    setPaywallStatus("Stripe billing portal opened.", true);
     closeDrawer();
   } catch (error) {
     setPaywallStatus(error.message || "Unable to open subscription settings.");
@@ -924,7 +941,7 @@ async function openBillingPortal() {
 
 function openExternalPage(pathname) {
   const base = "https://voicetext.world";
-  chrome.tabs.create({ url: `${base}${pathname}` });
+  void navigateActiveTabOrOpen(`${base}${pathname}`);
 }
 
 async function showWelcomeOnFirstLaunch() {
