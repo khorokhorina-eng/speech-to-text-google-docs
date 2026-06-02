@@ -789,6 +789,7 @@ let activeVoiceCommands = buildVoiceCommands(navigator.language || "en-US");
 let pendingReadyCue = false;
 let readyCueAudioContext = null;
 let liveInterimInsertedText = "";
+let liveInterimRevision = 0;
 
 function resolveRecognitionLanguage(language) {
   const normalized = typeof language === "string" && language.trim() ? language.trim() : "Auto";
@@ -1362,6 +1363,7 @@ async function removeLiveInterimText() {
     return true;
   }
 
+  liveInterimRevision += 1;
   liveInterimInsertedText = "";
 
   try {
@@ -1378,6 +1380,8 @@ async function removeLiveInterimText() {
 async function syncLiveInterimText(text) {
   const normalizedTranscript = normalizeTranscriptChunk(text);
   const nextText = normalizedTranscript ? `${normalizedTranscript} ` : "";
+  const revision = liveInterimRevision + 1;
+  liveInterimRevision = revision;
 
   if (nextText === liveInterimInsertedText) {
     return;
@@ -1396,7 +1400,7 @@ async function syncLiveInterimText(text) {
       type: "nativeTypeText",
       text: nextText,
     });
-    if (response?.inserted) {
+    if (response?.inserted && liveInterimRevision === revision) {
       liveInterimInsertedText = nextText;
     }
   } catch (_error) {
@@ -1415,6 +1419,7 @@ async function handleRecognizedText(text) {
     return;
   }
 
+  liveInterimRevision += 1;
   await removeLiveInterimText().catch(() => null);
   const inserted = await insertTextIntoGoogleDocs(normalizedTranscript, text);
   if (!inserted) {
@@ -1453,6 +1458,7 @@ function queueRecognizedText(text) {
 
 function flushPendingInterimText() {
   const pending = normalizeTranscriptChunk(pendingInterimText || state.interimTranscript || "");
+  liveInterimRevision += 1;
   void removeLiveInterimText();
   pendingInterimText = "";
   state.interimTranscript = "";
