@@ -339,6 +339,55 @@ function writeState(state) {
   fs.writeFileSync(STATE_PATH, JSON.stringify(state, null, 2));
 }
 
+function getSubscriptionOverrideForAccount(state, account) {
+  const normalizedEmail = String(account?.email || "").trim().toLowerCase();
+  if (!normalizedEmail) {
+    return null;
+  }
+
+  const override = state.subscriptionOverridesByEmail?.[normalizedEmail];
+  if (!override || override.active !== true) {
+    return null;
+  }
+
+  const planId = String(override.planId || "monthly");
+  const periodEndIso = override.currentPeriodEnd || null;
+  const periodEndMs = periodEndIso ? Date.parse(periodEndIso) : NaN;
+  if (Number.isFinite(periodEndMs) && periodEndMs <= Date.now()) {
+    delete state.subscriptionOverridesByEmail[normalizedEmail];
+    return null;
+  }
+
+  const plan = PLAN_DEFINITIONS.find((entry) => entry.id === planId) || PLAN_DEFINITIONS[0] || null;
+  const interval = planId === "annual" ? "year" : "month";
+  const currentPeriodStart =
+    override.currentPeriodStart ||
+    new Date(Date.now() - 1000 * 60 * 60).toISOString();
+  const currentPeriodEnd =
+    periodEndIso ||
+    new Date(
+      Date.now() + (interval === "year" ? 1000 * 60 * 60 * 24 * 365 : 1000 * 60 * 60 * 24 * 31)
+    ).toISOString();
+
+  return {
+    active: true,
+    status: "active",
+    customerId: state.accountToCustomer[account.id] || null,
+    email: normalizedEmail,
+    signedIn: true,
+    plan: {
+      planId: plan?.id || planId,
+      subscriptionId: String(override.subscriptionId || `override_${planId}_${normalizedEmail}`),
+      priceId: String(override.priceId || ""),
+      interval,
+      currentPeriodStart,
+      currentPeriodEnd,
+      cancelAtPeriodEnd: Boolean(override.cancelAtPeriodEnd),
+      cancelAt: override.cancelAt || null,
+    },
+  };
+}
+
 function setCorsHeaders(res) {
   res.setHeader("Access-Control-Allow-Origin", "*");
   res.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
@@ -966,6 +1015,11 @@ async function lookupSubscriptionStatusForAccount(state, account) {
     };
   }
 
+  const override = getSubscriptionOverrideForAccount(state, account);
+  if (override) {
+    return override;
+  }
+
   const customerId = state.accountToCustomer[account.id];
   if (!customerId) {
     return {
@@ -1038,6 +1092,10 @@ async function lookupSubscriptionStatusForAccount(state, account) {
 }
 
 async function resolveSubscriptionStatusForAccount(state, account) {
+  const override = getSubscriptionOverrideForAccount(state, account);
+  if (override) {
+    return override;
+  }
   return lookupSubscriptionStatusForAccount(state, account);
 }
 
