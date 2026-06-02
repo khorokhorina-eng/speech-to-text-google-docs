@@ -34,14 +34,21 @@ const drawerPlanNameEl = document.getElementById("drawerPlanName");
 const drawerPlanMetaEl = document.getElementById("drawerPlanMeta");
 const drawerEmailEl = document.getElementById("drawerEmail");
 const drawerUpgradeBtn = document.getElementById("drawerUpgrade");
+const drawerManageSubscriptionBtn = document.getElementById("drawerManageSubscription");
 const authToastEl = document.getElementById("authToast");
 const authOverlayEl = document.getElementById("authOverlay");
 const readerScreenEl = document.getElementById("readerScreen");
 const paywallScreenEl = document.getElementById("paywallScreen");
 const backToReaderBtn = document.getElementById("backToReader");
+const activeSubscriptionPanelEl = document.getElementById("activeSubscriptionPanel");
+const activeSubscriptionCopyEl = document.getElementById("activeSubscriptionCopy");
+const changePlanBtn = document.getElementById("changePlanBtn");
+const cancelSubscriptionBtn = document.getElementById("cancelSubscriptionBtn");
+const monthlyPlanCardEl = document.getElementById("monthlyPlanCard");
+const annualPlanCardEl = document.getElementById("annualPlanCard");
 
 const ANALYTICS_SESSION_ID = `${Date.now()}_${Math.random().toString(16).slice(2, 10)}`;
-const FREE_TRIAL_SESSIONS = 15;
+const FREE_TRIAL_SESSIONS = 10;
 const TRIAL_EXHAUSTED_EVENT_SENT_KEY = "trialExhaustedEventSent";
 const RECOGNITION_LANGUAGE_OPTIONS = [
   { value: "Auto", label: "Auto (browser language)" },
@@ -217,13 +224,32 @@ function getPlanLabel(plan) {
   return "Premium plan";
 }
 
+function formatPlanDateLabel(value) {
+  if (!value) {
+    return "";
+  }
+  const raw = Number(value);
+  const date =
+    Number.isFinite(raw) && raw > 0
+      ? new Date(raw * 1000)
+      : new Date(String(value));
+  if (Number.isNaN(date.getTime())) {
+    return "";
+  }
+  return new Intl.DateTimeFormat("en-US", {
+    month: "long",
+    day: "numeric",
+    year: "numeric",
+  }).format(date);
+}
+
 function formatSessions(value) {
   const numeric = Number(value);
   if (!Number.isFinite(numeric) || numeric <= 0) {
-    return "0 sessions";
+    return "0 dictations";
   }
   const rounded = Math.max(0, Math.floor(numeric));
-  return `${rounded} ${rounded === 1 ? "session" : "sessions"}`;
+  return `${rounded} ${rounded === 1 ? "dictation" : "dictations"}`;
 }
 
 function populateRecognitionLanguageOptions() {
@@ -312,9 +338,16 @@ function trackExtensionOpened() {
 
 function getPlanPresentation() {
   if (state.subscription.active) {
+    const endLabel = formatPlanDateLabel(state.subscription.plan?.currentPeriodEnd);
+    const meta =
+      state.subscription.plan?.cancelAtPeriodEnd && endLabel
+        ? `Ends on ${endLabel}.`
+        : endLabel
+        ? `Renews on ${endLabel}.`
+        : "Unlimited dictation is active on this account.";
     return {
       name: getPlanLabel(state.subscription.plan),
-      meta: "Premium dictation is active on this account.",
+      meta,
     };
   }
 
@@ -323,7 +356,7 @@ function getPlanPresentation() {
     meta:
       Number(state.subscription.sessionsLeft) > 0
         ? `${formatSessions(state.subscription.sessionsLeft)} remaining in your free trial.`
-        : "Upgrade to unlock premium dictation.",
+        : "Choose a plan to keep dictating.",
   };
 }
 
@@ -361,6 +394,14 @@ function updatePaywallButtons() {
   const activePlanId = state.subscription.plan?.planId || "";
   const monthlyCurrent = state.subscription.active && activePlanId === "monthly";
   const annualCurrent = state.subscription.active && activePlanId === "annual";
+
+  if (state.subscription.active) {
+    continueCheckoutMonthlyBtn.textContent = "Current monthly plan";
+    continueCheckoutAnnualBtn.textContent = "Current yearly plan";
+    continueCheckoutMonthlyBtn.disabled = true;
+    continueCheckoutAnnualBtn.disabled = true;
+    return;
+  }
 
   continueCheckoutMonthlyBtn.textContent = monthlyCurrent
     ? "Current monthly plan"
@@ -401,7 +442,11 @@ function updateAuthUI() {
   authSignedInTextEl.textContent = state.auth.signedIn ? `Signed in as ${state.auth.email}` : "";
   authMessageEl.textContent = state.auth.signedIn
     ? ""
-    : "Sign in to continue to checkout.";
+    : "Sign in with Google to choose a plan.";
+  drawerManageSubscriptionBtn?.classList.toggle(
+    "hidden",
+    !(state.auth.signedIn && state.subscription.active)
+  );
 
   if (isAuthenticating && state.auth.signedIn) {
     setAuthenticating(false);
@@ -417,7 +462,7 @@ function updateQuotaUI() {
   }
 
   quotaEl.textContent = isTrialEndedState()
-    ? "0 sessions left in trial"
+    ? "0 dictations left in trial"
     : `${formatSessions(state.subscription.sessionsLeft)} left in trial`;
 }
 
@@ -429,7 +474,7 @@ function updateDictationUI() {
     ? "Trial ended"
     : STATUS_LABELS[dictation.status] || "Ready";
   hintEl.textContent = trialEnded
-    ? "Your free trial has ended. Choose your plan to keep dictating."
+    ? "Keep dictating in Google Docs without limits."
     : dictation.message || " ";
   docTitleEl.textContent = dictation.docTitle || "No active Google Docs tab";
 
@@ -459,8 +504,20 @@ function updateUI() {
   updateAuthUI();
   updateQuotaUI();
   updateDictationUI();
-updatePaywallButtons();
-void loadPricingPlans();
+  updatePaywallButtons();
+  activeSubscriptionPanelEl?.classList.toggle("hidden", !state.subscription.active);
+  monthlyPlanCardEl?.classList.toggle("hidden", state.subscription.active);
+  annualPlanCardEl?.classList.toggle("hidden", state.subscription.active);
+  if (activeSubscriptionCopyEl) {
+    const endLabel = formatPlanDateLabel(state.subscription.plan?.currentPeriodEnd);
+    activeSubscriptionCopyEl.textContent =
+      state.subscription.plan?.cancelAtPeriodEnd && endLabel
+        ? `Your ${getPlanLabel(state.subscription.plan).toLowerCase()} ends on ${endLabel}.`
+        : endLabel
+        ? `Your ${getPlanLabel(state.subscription.plan).toLowerCase()} renews on ${endLabel}.`
+        : "Your paid plan is active on this account.";
+  }
+  void loadPricingPlans();
 }
 
 async function maybeTrackTrialExhausted(source = "state_update") {
@@ -530,7 +587,7 @@ async function loadSubscriptionStatus() {
     } else {
       setPaywallStatus(
         state.auth.signedIn
-          ? "No active subscription detected."
+          ? "Choose monthly or yearly access."
           : "Choose a plan and continue with Google."
       );
     }
@@ -736,8 +793,8 @@ function openPaywall(source = "unknown") {
     } else {
       setPaywallStatus(
         state.auth.signedIn
-          ? "No active subscription detected."
-        : "Choose a plan and continue with Google."
+          ? "Choose monthly or yearly access."
+          : "Choose a plan and continue with Google."
       );
     }
     void maybeTrackTrialExhausted("paywall_opened");
@@ -750,6 +807,11 @@ async function openCheckout(planId, button) {
     authReturnScreen = "paywall";
     setPaywallStatus("Sign in with Google to continue.");
     await signInWithGoogle(`checkout_${planId}`);
+    return;
+  }
+
+  if (state.subscription.active) {
+    await openBillingPortal();
     return;
   }
 
@@ -766,7 +828,7 @@ async function openCheckout(planId, button) {
     const result = await sendRuntimeMessage({
       type: "createCheckoutSession",
       planId,
-      returnUrl: chrome.runtime.getURL("paywall.html"),
+      returnUrl: await getReturnUrlForAuth(),
     });
     if (!result.url) {
       throw new Error("Checkout URL is missing.");
@@ -779,6 +841,41 @@ async function openCheckout(planId, button) {
     button.disabled = false;
     button.textContent = initialLabel;
     updatePaywallButtons();
+  }
+}
+
+async function openBillingPortal() {
+  if (!state.auth.signedIn) {
+    setPaywallStatus("Sign in before managing your subscription.");
+    return;
+  }
+
+  if (!state.subscription.active) {
+    setPaywallStatus("No active subscription found on this account.");
+    return;
+  }
+
+  drawerManageSubscriptionBtn && (drawerManageSubscriptionBtn.disabled = true);
+  changePlanBtn && (changePlanBtn.disabled = true);
+  cancelSubscriptionBtn && (cancelSubscriptionBtn.disabled = true);
+  try {
+    const returnUrl = await getReturnUrlForAuth();
+    const result = await sendRuntimeMessage({
+      type: "createBillingPortalSession",
+      returnUrl,
+    });
+    if (!result.url) {
+      throw new Error("Billing portal URL is missing.");
+    }
+    chrome.tabs.create({ url: result.url });
+    setPaywallStatus("Stripe billing portal opened in a new tab.", true);
+    closeDrawer();
+  } catch (error) {
+    setPaywallStatus(error.message || "Unable to open subscription settings.");
+  } finally {
+    drawerManageSubscriptionBtn && (drawerManageSubscriptionBtn.disabled = false);
+    changePlanBtn && (changePlanBtn.disabled = false);
+    cancelSubscriptionBtn && (cancelSubscriptionBtn.disabled = false);
   }
 }
 
@@ -825,6 +922,9 @@ function initializePopup() {
     void trackAnalyticsEvent("upgrade_clicked", { source: "drawer_button" });
     openPaywall("drawer_button");
   });
+  drawerManageSubscriptionBtn?.addEventListener("click", () => {
+    void openBillingPortal();
+  });
   contactBtn.addEventListener("click", () => {
     openExternalPage("/support");
   });
@@ -848,6 +948,12 @@ function initializePopup() {
   });
   continueCheckoutAnnualBtn.addEventListener("click", () => {
     void openCheckout("annual", continueCheckoutAnnualBtn);
+  });
+  changePlanBtn?.addEventListener("click", () => {
+    void openBillingPortal();
+  });
+  cancelSubscriptionBtn?.addEventListener("click", () => {
+    void openBillingPortal();
   });
   profileTriggerBtn.addEventListener("click", () => {
     openDrawer();

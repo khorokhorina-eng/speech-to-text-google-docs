@@ -1,6 +1,6 @@
 const REMOTE_API_BASE_URL = "https://voicetext.world";
 const BILLING_ENDPOINTS = [REMOTE_API_BASE_URL];
-const FREE_TRIAL_SESSIONS = 15;
+const FREE_TRIAL_SESSIONS = 10;
 const UNINSTALL_URL = `${REMOTE_API_BASE_URL}/uninstall.html`;
 const DEVICE_TOKEN_KEY = "deviceToken";
 const AUTH_SESSION_KEY = "authSession";
@@ -24,6 +24,29 @@ let pricingPlansCache = {
 };
 
 const tabStateCache = new Map();
+
+function normalizePlanDetails(plan, fallbackPlanId = "") {
+  if (plan && typeof plan === "object" && !Array.isArray(plan)) {
+    return {
+      planId: typeof plan.planId === "string" ? plan.planId : fallbackPlanId || null,
+      interval: plan.interval || null,
+      currentPeriodStart: plan.currentPeriodStart || null,
+      currentPeriodEnd: plan.currentPeriodEnd || null,
+      cancelAtPeriodEnd: Boolean(plan.cancelAtPeriodEnd),
+      cancelAt: plan.cancelAt || null,
+    };
+  }
+
+  if (typeof plan === "string" && plan.trim()) {
+    return { planId: plan.trim() };
+  }
+
+  if (fallbackPlanId) {
+    return { planId: fallbackPlanId };
+  }
+
+  return null;
+}
 
 async function configureSidePanelBehavior() {
   if (!chrome.sidePanel?.setPanelBehavior) {
@@ -324,7 +347,7 @@ async function getSubscriptionStatus(forceRefresh = false) {
       deviceToken,
       active: !!data.paid,
       status: data.subscriptionStatus || "none",
-      plan: data.plan ? { planId: data.plan } : null,
+      plan: normalizePlanDetails(data.plan),
       sessionsLeft: localState.sessionsLeft,
       freeTrialSessions: FREE_TRIAL_SESSIONS,
       timestamp: now,
@@ -439,6 +462,27 @@ async function createCheckoutSession(planId, returnUrl) {
     email: authState.email,
     url: data.url,
     sessionId: data.sessionId || null,
+  };
+}
+
+async function createBillingPortalSession(returnUrl) {
+  const deviceToken = await getOrCreateDeviceToken();
+  const authState = await getAuthState();
+
+  if (!authState.signedIn || !authState.email) {
+    throw new Error("Sign in required before managing your subscription.");
+  }
+
+  const url = new URL(`${REMOTE_API_BASE_URL}/portal/start`);
+  url.searchParams.set("device_token", deviceToken);
+  if (typeof returnUrl === "string" && returnUrl.trim()) {
+    url.searchParams.set("return_url", returnUrl.trim());
+  }
+
+  return {
+    deviceToken,
+    email: authState.email,
+    url: url.toString(),
   };
 }
 
@@ -812,6 +856,13 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     createCheckoutSession(message.planId, message.returnUrl)
       .then((result) => sendResponse({ ok: true, ...result }))
       .catch((error) => sendResponse({ ok: false, error: error.message || "Failed to create checkout session." }));
+    return true;
+  }
+
+  if (message.type === "createBillingPortalSession") {
+    createBillingPortalSession(message.returnUrl)
+      .then((result) => sendResponse({ ok: true, ...result }))
+      .catch((error) => sendResponse({ ok: false, error: error.message || "Failed to open billing portal." }));
     return true;
   }
 

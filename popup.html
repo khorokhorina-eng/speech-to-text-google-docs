@@ -33,11 +33,12 @@
           <div class="drawer-block">
             <p class="drawer-label">Current plan</p>
             <p id="drawerPlanName" class="drawer-value">Free Trial</p>
-            <p id="drawerPlanMeta" class="drawer-plan-meta">15 free sessions included.</p>
+            <p id="drawerPlanMeta" class="drawer-plan-meta">10 free dictations included.</p>
           </div>
         </section>
 
         <button id="drawerUpgrade" class="drawer-upgrade-btn">Upgrade</button>
+        <button id="drawerManageSubscription" class="drawer-link-btn hidden">Cancel subscription</button>
         <button id="accountAction" class="drawer-link-btn">Sign in with Google</button>
       </aside>
 
@@ -59,9 +60,9 @@
           </section>
 
           <section id="trialEndedNotice" class="trial-banner hidden">
-            <p class="trial-banner-title">Free trial ended</p>
-            <p class="trial-banner-copy">Upgrade to keep dictating in Google Docs.</p>
-            <button id="trialUpgrade" class="trial-upgrade-btn">Upgrade to premium</button>
+            <p class="trial-banner-title">Your trial is over</p>
+            <p class="trial-banner-copy">Keep dictating in Google Docs without limits.</p>
+            <button id="trialUpgrade" class="trial-upgrade-btn">Choose a plan</button>
           </section>
 
           <section class="status-card">
@@ -69,7 +70,7 @@
               <p id="status" class="status-text">Ready</p>
               <span class="live-dot" aria-hidden="true"></span>
             </div>
-            <p id="quota" class="status-subcopy">15 free sessions included</p>
+            <p id="quota" class="status-subcopy">10 free dictations included</p>
           </section>
 
           <section class="status-card language-card">
@@ -113,13 +114,14 @@
         <section id="paywallScreen" class="screen hidden">
           <section class="paywall-card">
             <p class="eyebrow">Dictation plans</p>
-            <h2 class="paywall-title">Unlock premium dictation</h2>
+            <h2 class="paywall-title">Your trial is over</h2>
+            <p class="paywall-copy-strong">Keep dictating in Google Docs without limits</p>
             <p id="paywallStatus" class="paywall-status">Checking subscription status...</p>
 
             <section id="authPanel" class="auth-panel">
               <div id="authCopy">
                 <p class="drawer-label">Sign in with Google</p>
-                <p id="authMessage" class="auth-message">Use your free trial first. Sign in with Google when you want to buy a plan.</p>
+                <p id="authMessage" class="auth-message">Sign in with Google to choose a plan.</p>
               </div>
               <button id="authGoogle" class="auth-google">Continue with Google</button>
               <div id="authSignedIn" class="auth-signed-in hidden">
@@ -128,8 +130,17 @@
               </div>
             </section>
 
+            <section id="activeSubscriptionPanel" class="auth-panel hidden">
+              <div>
+                <p class="drawer-label">Manage subscription</p>
+                <p id="activeSubscriptionCopy" class="auth-message">Your paid plan is active on this account.</p>
+              </div>
+              <button id="changePlanBtn" class="secondary-action" type="button">Change plan</button>
+              <button id="cancelSubscriptionBtn" class="drawer-link-btn" type="button">Cancel subscription</button>
+            </section>
+
             <div class="paywall-grid">
-              <article class="paywall-plan-card" data-plan-id="monthly">
+              <article id="monthlyPlanCard" class="paywall-plan-card" data-plan-id="monthly">
                 <p class="paywall-plan-title">Monthly</p>
                 <div class="paywall-price-row">
                   <span id="monthlyDailyPrice" class="paywall-price">$0.33</span>
@@ -137,14 +148,14 @@
                 </div>
                 <p id="monthlyBillingNote" class="paywall-billing-note">Billed monthly $9.99 / month</p>
                 <ul class="feature-list">
-                  <li>Unlimited dictation sessions</li>
-                  <li>Speech input directly in Google Docs</li>
-                  <li>Premium support access</li>
+                  <li>Keep dictating in Google Docs</li>
+                  <li>No session limits</li>
+                  <li>Works in the side panel</li>
                 </ul>
                 <button id="continueCheckoutMonthly" class="subscribe-btn">Subscribe monthly</button>
               </article>
 
-              <article class="paywall-plan-card featured" data-plan-id="annual">
+              <article id="annualPlanCard" class="paywall-plan-card featured" data-plan-id="annual">
                 <p class="plan-badge">Best Value</p>
                 <p class="paywall-plan-title">Yearly</p>
                 <div class="paywall-price-row">
@@ -153,9 +164,9 @@
                 </div>
                 <p id="annualBillingNote" class="paywall-billing-note">Billed annually $89.99 / year</p>
                 <ul class="feature-list">
-                  <li>Best price for everyday dictation</li>
-                  <li>Unlimited sessions without trial limits</li>
-                  <li>Premium support access</li>
+                  <li>Keep dictating in Google Docs</li>
+                  <li>No session limits</li>
+                  <li>Works in the side panel</li>
                 </ul>
                 <button id="continueCheckoutAnnual" class="subscribe-btn">Subscribe yearly</button>
               </article>

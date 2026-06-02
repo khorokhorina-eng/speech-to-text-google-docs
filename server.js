@@ -40,7 +40,7 @@ function loadEnvFile() {
 loadEnvFile();
 
 const PORT = Number(process.env.PORT || 8787);
-const FREE_TRIAL_SESSIONS = Math.max(1, Number(process.env.FREE_TRIAL_SESSIONS || 15));
+const FREE_TRIAL_SESSIONS = Math.max(1, Number(process.env.FREE_TRIAL_SESSIONS || 10));
 const FREE_MINUTES = Math.max(1, Number(process.env.FREE_MINUTES || 2));
 const FREE_TRIAL_SECONDS = Math.max(1, Math.floor(FREE_MINUTES * 60));
 const PUBLIC_BASE_URL = (process.env.PUBLIC_BASE_URL || "").replace(/\/+$/, "");
@@ -379,6 +379,28 @@ function getPublicUrl(pathname) {
     return `http://127.0.0.1:${PORT}${pathname}`;
   }
   return `${PUBLIC_BASE_URL}${pathname}`;
+}
+
+function sanitizeExtensionReturnUrl(value) {
+  if (typeof value !== "string") {
+    return "";
+  }
+
+  const trimmed = value.trim();
+  if (!trimmed) {
+    return "";
+  }
+
+  try {
+    const parsed = new URL(trimmed);
+    if (!["chrome-extension:", "https:", "http:", "file:"].includes(parsed.protocol)) {
+      return "";
+    }
+    parsed.hash = "";
+    return parsed.toString();
+  } catch (_error) {
+    return "";
+  }
 }
 
 function sanitizeReturnUrl(value) {
@@ -1009,8 +1031,14 @@ async function lookupSubscriptionStatusForAccount(state, account) {
       interval: item?.price?.recurring?.interval || null,
       currentPeriodStart: activeSub.current_period_start || null,
       currentPeriodEnd: activeSub.current_period_end || null,
+      cancelAtPeriodEnd: Boolean(activeSub.cancel_at_period_end),
+      cancelAt: activeSub.cancel_at || null,
     },
   };
+}
+
+async function resolveSubscriptionStatusForAccount(state, account) {
+  return lookupSubscriptionStatusForAccount(state, account);
 }
 
 async function fetchGoogleUserInfo(accessToken) {
@@ -1081,7 +1109,7 @@ async function handleAuthMe(req, res, parsedUrl) {
       signedInAt: account?.updatedAt || null,
       paid: subscription.active,
       subscriptionStatus: subscription.status || "none",
-      plan: subscription.plan?.planId || null,
+      plan: subscription.plan || null,
       sessionsLeft: subscription.active ? null : FREE_TRIAL_SESSIONS,
       freeTrialSessions: FREE_TRIAL_SESSIONS,
     });
@@ -1315,7 +1343,7 @@ async function handleGoogleCallback(_req, res, parsedUrl) {
     writeState(state);
 
     const trialMessage = trialSync.reducedByAccount
-      ? " This Google account already used part of the free trial, so your remaining free sessions were updated."
+      ? " This Google account already used part of the free trial, so your remaining free dictations were updated."
       : "";
 
     sendHtml(
@@ -1446,6 +1474,274 @@ async function handleCreateCheckoutSession(req, res, parsedUrl) {
   } catch (error) {
     sendJson(res, 500, { error: error.message || "Failed to create checkout session." });
   }
+}
+
+function formatPeriodEndLabel(value) {
+  if (!value) {
+    return "";
+  }
+
+  const raw = Number(value);
+  const date =
+    Number.isFinite(raw) && raw > 0
+      ? new Date(raw * 1000)
+      : new Date(String(value));
+  if (Number.isNaN(date.getTime())) {
+    return "";
+  }
+
+  return new Intl.DateTimeFormat("en-US", {
+    month: "long",
+    day: "numeric",
+    year: "numeric",
+  }).format(date);
+}
+
+function renderPortalReturnPage({ title, message, ctaLabel = "Back to Google Docs", returnUrl = "" }) {
+  const safeReturn = sanitizeExtensionReturnUrl(returnUrl) || "https://docs.google.com/document/";
+  return `<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>${title}</title>
+    <style>
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        font-family: Manrope, "Avenir Next", "Segoe UI", "Helvetica Neue", Arial, sans-serif;
+        min-height: 100vh;
+        padding: 28px 18px;
+        background:
+          radial-gradient(circle at top, rgba(95, 132, 255, 0.18), transparent 30%),
+          radial-gradient(circle at top left, rgba(53, 95, 216, 0.1), transparent 28%),
+          linear-gradient(180deg, #fbfcff 0%, #f5f7ff 100%);
+        color: #191c24;
+      }
+      .card {
+        max-width: 760px;
+        margin: 0 auto;
+        background: rgba(255, 255, 255, 0.94);
+        border: 1px solid #dfe6f4;
+        border-radius: 28px;
+        padding: 28px;
+        box-shadow: 0 18px 42px rgba(27, 27, 27, 0.06);
+      }
+      .eyebrow {
+        margin: 0 0 10px;
+        font-size: 12px;
+        font-weight: 650;
+        letter-spacing: 0.16em;
+        text-transform: uppercase;
+        color: #5f84ff;
+      }
+      h1 {
+        margin: 0 0 12px;
+        font-size: clamp(32px, 6vw, 52px);
+        line-height: 1;
+        letter-spacing: -0.025em;
+        font-weight: 620;
+        color: #232835;
+      }
+      p {
+        margin: 0 0 20px;
+        font-size: 18px;
+        line-height: 1.45;
+        color: #3d4558;
+      }
+      .cta {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        min-height: 54px;
+        padding: 0 22px;
+        border-radius: 999px;
+        text-decoration: none;
+        background: linear-gradient(180deg, #5f84ff 0%, #365fd8 100%);
+        color: #f7f9ff;
+        font-size: 16px;
+        font-weight: 700;
+      }
+    </style>
+  </head>
+  <body>
+    <section class="card">
+      <p class="eyebrow">Subscription updated</p>
+      <h1>${title}</h1>
+      <p>${message}</p>
+      <a class="cta" href="${safeReturn}">${ctaLabel}</a>
+    </section>
+  </body>
+</html>`;
+}
+
+async function handleCreateBillingPortalSession(req, res, parsedUrl) {
+  if (!ensureStripeConfigured(res)) {
+    return;
+  }
+
+  let body;
+  try {
+    body = await parseJsonBody(req);
+  } catch (error) {
+    sendJson(res, 400, { error: error.message || "Invalid request body." });
+    return;
+  }
+
+  const deviceToken = getDeviceToken(req, parsedUrl, body);
+  const returnUrl = sanitizeExtensionReturnUrl(body.returnUrl || body.return_url || "");
+  if (!deviceToken) {
+    sendJson(res, 400, { error: "device_token is required." });
+    return;
+  }
+
+  const state = readState();
+  const account = getAccountForDevice(state, deviceToken);
+  if (!account) {
+    sendJson(res, 401, { error: "Sign in is required before managing a subscription." });
+    return;
+  }
+
+  const customerId = state.accountToCustomer[account.id];
+  if (!customerId) {
+    sendJson(res, 404, { error: "No Stripe customer found for this account." });
+    return;
+  }
+
+  try {
+    const session = await stripe.billingPortal.sessions.create({
+      customer: customerId,
+      return_url: returnUrl || getPublicUrl("/paywall/cancel"),
+    });
+    sendJson(res, 200, { ok: true, url: session.url });
+  } catch (error) {
+    sendJson(res, 500, { error: error.message || "Unable to create billing portal session." });
+  }
+}
+
+async function handleBillingPortalStart(req, res, parsedUrl) {
+  if (!ensureStripeConfigured(res)) {
+    return;
+  }
+
+  const deviceToken = getDeviceToken(req, parsedUrl, null);
+  const requestedReturnUrl = sanitizeExtensionReturnUrl(parsedUrl.searchParams.get("return_url") || "");
+  const returnUrl =
+    requestedReturnUrl ||
+    `${getPublicUrl("/portal/return")}?device_token=${encodeURIComponent(deviceToken)}`;
+  if (!deviceToken) {
+    sendJson(res, 400, { error: "device_token is required." });
+    return;
+  }
+
+  const state = readState();
+  const account = getAccountForDevice(state, deviceToken);
+  if (!account) {
+    sendHtml(
+      res,
+      200,
+      renderPortalReturnPage({
+        title: "Sign-in required",
+        message: "Please sign in to the account with an active subscription before opening billing settings.",
+        returnUrl,
+      })
+    );
+    return;
+  }
+
+  const customerId = state.accountToCustomer[account.id];
+  if (!customerId) {
+    sendHtml(
+      res,
+      200,
+      renderPortalReturnPage({
+        title: "No active subscription found",
+        message: "This account does not have an active paid plan to manage in Stripe.",
+        returnUrl,
+      })
+    );
+    return;
+  }
+
+  try {
+    const session = await stripe.billingPortal.sessions.create({
+      customer: customerId,
+      return_url: returnUrl,
+    });
+    redirect(res, session.url);
+  } catch (error) {
+    sendHtml(
+      res,
+      500,
+      renderAuthCompletePage(
+        "Billing unavailable",
+        error.message || "Unable to open subscription settings.",
+        returnUrl
+      )
+    );
+  }
+}
+
+async function handlePortalReturn(req, res, parsedUrl) {
+  const deviceToken = getDeviceToken(req, parsedUrl, null);
+  const state = readState();
+  const account = getAccountForDevice(state, deviceToken);
+  const subscription = await resolveSubscriptionStatusForAccount(state, account);
+  const returnUrl = "https://docs.google.com/document/";
+  const periodEndLabel = formatPeriodEndLabel(subscription.plan?.currentPeriodEnd);
+
+  if (!account) {
+    sendHtml(
+      res,
+      200,
+      renderPortalReturnPage({
+        title: "Subscription settings updated",
+        message: "Return to the extension to refresh your current access status.",
+        returnUrl,
+      })
+    );
+    return;
+  }
+
+  if (subscription.active && subscription.plan?.cancelAtPeriodEnd) {
+    sendHtml(
+      res,
+      200,
+      renderPortalReturnPage({
+        title: "Subscription canceled",
+        message: periodEndLabel
+          ? `Your access stays active until ${periodEndLabel}. After that, your plan will not renew.`
+          : "Your plan will stay active until the end of the current billing period and will not renew.",
+        returnUrl,
+      })
+    );
+    return;
+  }
+
+  if (subscription.active) {
+    sendHtml(
+      res,
+      200,
+      renderPortalReturnPage({
+        title: "Subscription active",
+        message: periodEndLabel
+          ? `Your current plan renews on ${periodEndLabel}.`
+          : "Your current plan is active on this account.",
+        returnUrl,
+      })
+    );
+    return;
+  }
+
+  sendHtml(
+    res,
+    200,
+    renderPortalReturnPage({
+      title: "No active subscription",
+      message: "This account does not have an active paid plan right now.",
+      returnUrl,
+    })
+  );
 }
 
 async function handleSubscriptionStatus(req, res, parsedUrl) {
@@ -1719,6 +2015,26 @@ const server = http.createServer(async (req, res) => {
     (parsedUrl.pathname === "/stripe/checkout-session" || parsedUrl.pathname === "/checkout")
   ) {
     await handleCreateCheckoutSession(req, res, parsedUrl);
+    return;
+  }
+
+  if (req.method === "POST" && parsedUrl.pathname === "/billing/portal") {
+    await handleCreateBillingPortalSession(req, res, parsedUrl);
+    return;
+  }
+
+  if (req.method === "GET" && parsedUrl.pathname === "/billing/portal/start") {
+    await handleBillingPortalStart(req, res, parsedUrl);
+    return;
+  }
+
+  if (req.method === "GET" && parsedUrl.pathname === "/portal/start") {
+    await handleBillingPortalStart(req, res, parsedUrl);
+    return;
+  }
+
+  if (req.method === "GET" && parsedUrl.pathname === "/portal/return") {
+    await handlePortalReturn(req, res, parsedUrl);
     return;
   }
 

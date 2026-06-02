@@ -254,9 +254,16 @@ body.drawer-open .account-drawer { transform: translateX(0); }
 .drawer-label { margin: 0; font-size: 13px; font-weight: 650; color: var(--muted); }
 .drawer-value { margin: 0; font-size: 18px; line-height: 1.2; font-weight: 620; color: #232835; }
 .drawer-divider { height: 1px; background: rgba(223,230,244,.9); }
-.paywall-card { padding: 14px; display: flex; flex-direction: column; gap: 8px; }
-.paywall-title { font-size: 26px; line-height: 1; font-weight: 620; color: #232835; }
-.paywall-status { font-size: 11px; line-height: 1.3; }
+.paywall-card { padding: 14px; display: flex; flex-direction: column; gap: 10px; }
+.paywall-title { font-size: 26px; line-height: 1.05; font-weight: 700; color: #232835; }
+.paywall-status { margin: 0; font-size: 13px; line-height: 1.4; color: var(--muted); }
+.paywall-copy-strong {
+  margin: 0;
+  font-size: 15px;
+  line-height: 1.35;
+  font-weight: 650;
+  color: #232835;
+}
 .auth-panel {
   border: 1px solid var(--line); border-radius: 18px; padding: 10px 12px; background: rgba(255,255,255,.72); display: grid; gap: 8px;
 }

@@ -14,6 +14,12 @@ const monthlyDescEl = document.getElementById("monthlyDesc");
 const annualPriceEl = document.getElementById("annualPrice");
 const annualPeriodEl = document.getElementById("annualPeriod");
 const annualDescEl = document.getElementById("annualDesc");
+const managePanelEl = document.getElementById("managePanel");
+const manageMessageEl = document.getElementById("manageMessage");
+const changePlanBtn = document.getElementById("changePlan");
+const cancelSubscriptionBtn = document.getElementById("cancelSubscription");
+const monthlyPlanCardEl = document.getElementById("monthlyPlanCard");
+const annualPlanCardEl = document.getElementById("annualPlanCard");
 
 let currentSubscription = { active: false, plan: null };
 let authState = { signedIn: false, email: "", method: null };
@@ -28,6 +34,25 @@ function getPlanLabel(plan) {
     return "Monthly plan";
   }
   return "Paid plan";
+}
+
+function formatPlanDateLabel(value) {
+  if (!value) {
+    return "";
+  }
+  const raw = Number(value);
+  const date =
+    Number.isFinite(raw) && raw > 0
+      ? new Date(raw * 1000)
+      : new Date(String(value));
+  if (Number.isNaN(date.getTime())) {
+    return "";
+  }
+  return new Intl.DateTimeFormat("en-US", {
+    month: "long",
+    day: "numeric",
+    year: "numeric",
+  }).format(date);
 }
 
 function setStatus(text, ok = false) {
@@ -57,9 +82,11 @@ function updateButtons() {
   planButtons.forEach((button) => {
     const planId = button.dataset.planId || "";
     const isCurrentPlan = currentSubscription?.active && activePlanId === planId;
-    button.disabled = isCurrentPlan;
-    button.textContent = isCurrentPlan
-      ? "Current plan"
+    button.disabled = currentSubscription?.active || isCurrentPlan;
+    button.textContent = currentSubscription?.active
+      ? planId === "monthly"
+        ? "Current monthly plan"
+        : "Current yearly plan"
       : authState.signedIn
       ? "Upgrade"
       : "Sign in first";
@@ -114,7 +141,7 @@ async function loadAuthState() {
   authSignedInTextEl.textContent = authState.signedIn ? `Signed in as ${authState.email}` : "";
   authMessageEl.textContent = authState.signedIn
     ? ""
-    : "Use your free trial first. Sign in with Google when you want to buy a plan.";
+    : "Sign in with Google to choose a plan.";
   updateButtons();
 }
 
@@ -156,6 +183,11 @@ async function openCheckout(planId, button) {
     return;
   }
 
+  if (currentSubscription?.active) {
+    await openBillingPortal();
+    return;
+  }
+
   const initialLabel = button.textContent;
   button.disabled = true;
   button.textContent = "Creating checkout...";
@@ -184,6 +216,36 @@ async function openCheckout(planId, button) {
   }
 }
 
+async function openBillingPortal() {
+  if (!authState.signedIn) {
+    setStatus("Sign in before managing your subscription.");
+    return;
+  }
+  if (!currentSubscription?.active) {
+    setStatus("No active subscription found on this account.");
+    return;
+  }
+
+  changePlanBtn.disabled = true;
+  cancelSubscriptionBtn.disabled = true;
+  try {
+    const result = await sendMessage({
+      type: "createBillingPortalSession",
+      returnUrl: "https://docs.google.com/document/",
+    });
+    if (!result.url) {
+      throw new Error("Billing portal URL is missing.");
+    }
+    setStatus("Opening Stripe billing portal...");
+    window.location.assign(result.url);
+  } catch (error) {
+    setStatus(error.message || "Unable to open billing portal.");
+  } finally {
+    changePlanBtn.disabled = false;
+    cancelSubscriptionBtn.disabled = false;
+  }
+}
+
 async function loadSubscriptionStatus() {
   setStatus("Checking subscription status...");
 
@@ -192,6 +254,19 @@ async function loadSubscriptionStatus() {
     const result = await sendMessage({ type: "refreshSubscriptionStatus" });
     currentSubscription = result || { active: false, plan: null };
     updateButtons();
+    managePanelEl.hidden = !currentSubscription.active;
+    monthlyPlanCardEl.hidden = currentSubscription.active;
+    annualPlanCardEl.hidden = currentSubscription.active;
+
+    if (currentSubscription.active) {
+      const endLabel = formatPlanDateLabel(currentSubscription.plan?.currentPeriodEnd);
+      manageMessageEl.textContent =
+        currentSubscription.plan?.cancelAtPeriodEnd && endLabel
+          ? `Your ${getPlanLabel(currentSubscription.plan).toLowerCase()} ends on ${endLabel}.`
+          : endLabel
+          ? `Your ${getPlanLabel(currentSubscription.plan).toLowerCase()} renews on ${endLabel}.`
+          : "Your paid plan is active on this account.";
+    }
 
     if (currentSubscription.active) {
       setStatus(`Subscription active. Current plan: ${getPlanLabel(currentSubscription.plan)}.`, true);
@@ -226,6 +301,14 @@ authGoogleBtn.addEventListener("click", () => {
 
 authSignOutBtn.addEventListener("click", () => {
   signOut();
+});
+
+changePlanBtn.addEventListener("click", () => {
+  openBillingPortal();
+});
+
+cancelSubscriptionBtn.addEventListener("click", () => {
+  openBillingPortal();
 });
 
 closeBtn.addEventListener("click", () => {
