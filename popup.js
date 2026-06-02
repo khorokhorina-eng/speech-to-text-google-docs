@@ -294,6 +294,9 @@ function populateRecognitionLanguageOptions() {
 }
 
 function isTrialEndedState() {
+  if (state.dictation.status === "starting" || state.dictation.status === "listening") {
+    return false;
+  }
   const sessionsLeft = Number.isFinite(Number(state.subscription.sessionsLeft))
     ? Math.max(0, Math.floor(Number(state.subscription.sessionsLeft)))
     : 0;
@@ -505,6 +508,7 @@ function updateQuotaUI() {
 function updateDictationUI() {
   const dictation = state.dictation;
   const trialEnded = isTrialEndedState();
+  const isRunning = dictation.status === "listening" || dictation.status === "starting";
   document.body.dataset.status = dictation.status;
   statusEl.textContent = trialEnded
     ? "Trial ended"
@@ -514,7 +518,6 @@ function updateDictationUI() {
     : dictation.message || " ";
   docTitleEl.textContent = dictation.docTitle || "No active Google Docs tab";
 
-  const isRunning = dictation.status === "listening" || dictation.status === "starting";
   let startDisabledReason = "";
   if (trialEnded) {
     startDisabledReason = "trial";

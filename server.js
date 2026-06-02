@@ -1119,10 +1119,14 @@ async function handleAuthMe(req, res, parsedUrl) {
 }
 
 function renderAuthCompletePage(title, message, returnUrl = "", analyticsEvent = null) {
-  const isSuccess = title === "Google sign-in complete";
+  const normalizedTitle = String(title || "").toLowerCase();
+  const isSuccess =
+    normalizedTitle.includes("successful") ||
+    normalizedTitle.includes("success") ||
+    normalizedTitle.includes("complete");
   const accentLabel = isSuccess ? "SIGNED IN SUCCESSFULLY" : "SIGN-IN STATUS";
-  const helperText = isSuccess ? "You are signed in successfully." : "Something went wrong.";
-  const bodyText = isSuccess ? "Redirecting you back now." : message;
+  const helperText = isSuccess ? "Redirecting you back now." : "";
+  const bodyText = message;
   const safeReturnUrl = sanitizeReturnUrl(returnUrl);
   const ga4 = renderGa4Snippet(
     isSuccess ? "/reg-complete" : "/auth-status",
