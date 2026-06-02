@@ -486,14 +486,15 @@ function updateDictationUI() {
   let startDisabledReason = "";
   if (trialEnded) {
     startDisabledReason = "trial";
+  } else if (!dictation.isDocsPage) {
+    startDisabledReason = "docs";
   } else if (!dictation.supported) {
     startDisabledReason = "unsupported";
   } else if (!isRunning && dictation.status === "idle" && !dictation.cursorReady) {
     startDisabledReason = "cursor";
   }
 
-  const canOpenDocs = !trialEnded && !dictation.isDocsPage;
-  startBtn.disabled = (!canOpenDocs && Boolean(startDisabledReason)) || isRunning;
+  startBtn.disabled = Boolean(startDisabledReason) || isRunning;
   stopBtn.disabled = !isRunning || stopRequestInFlight;
   stopBtn.textContent = stopRequestInFlight ? "Stopping..." : "Stop dictation";
   stopBtn.setAttribute("aria-busy", stopRequestInFlight ? "true" : "false");
@@ -503,9 +504,7 @@ function updateDictationUI() {
   recordingTipsEl?.classList.toggle("hidden", !isRunning);
 
   if (!isRunning) {
-    if (canOpenDocs) {
-      startBtn.textContent = "Open Google Docs first";
-    } else if (startDisabledReason === "cursor") {
+    if (startDisabledReason === "cursor") {
       startBtn.textContent = "Click in document first";
     } else {
       startBtn.textContent = "Start recording";
@@ -515,18 +514,16 @@ function updateDictationUI() {
   trialEndedNoticeEl.classList.toggle("hidden", !trialEnded);
   statusCardEl?.classList.toggle("hidden", trialEnded);
   languageCardEl?.classList.toggle("hidden", trialEnded);
-  readerControlsEl?.classList.toggle("hidden", trialEnded);
+  readerControlsEl?.classList.toggle("hidden", trialEnded || !dictation.isDocsPage);
   documentCardEl?.classList.toggle("hidden", !dictation.isDocsPage && !trialEnded);
   actionHintEl?.classList.toggle(
     "hidden",
-    !(canOpenDocs || startDisabledReason === "cursor")
+    !(startDisabledReason === "cursor")
   );
 
   if (actionHintEl) {
     actionHintEl.textContent =
-      canOpenDocs
-        ? "Open a Google Docs document to start dictation."
-        : startDisabledReason === "cursor"
+      startDisabledReason === "cursor"
         ? "Click inside the document first so the extension knows where to insert text."
         : "";
   }
@@ -535,7 +532,8 @@ function updateDictationUI() {
     startBtn.disabled = true;
   } else if (!dictation.isDocsPage) {
     startBtn.disabled = false;
-    hintEl.textContent = "Open a Google Docs document first.";
+    hintEl.textContent = "Opening Google Docs...";
+    void autoOpenGoogleDocsIfNeeded();
   } else if (dictation.status === "idle" && !dictation.cursorReady) {
     hintEl.textContent = "Click inside Google Docs first, then start dictation.";
   }
@@ -685,10 +683,6 @@ async function refreshDictationState() {
 }
 
 async function startDictation() {
-  if (!state.dictation.isDocsPage) {
-    await autoOpenGoogleDocsIfNeeded();
-    return;
-  }
   try {
     void trackAnalyticsEvent("record_started", {
       signed_in: state.auth.signedIn,
