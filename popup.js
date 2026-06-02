@@ -548,6 +548,9 @@ function updateDictationUI() {
 
   if (trialEnded) {
     startBtn.disabled = true;
+  } else if (isAuthenticating) {
+    startBtn.disabled = true;
+    hintEl.textContent = "Complete Google sign-in in this tab.";
   } else if (!dictation.isDocsPage) {
     startBtn.disabled = false;
     hintEl.textContent = "Opening Google Docs...";
@@ -787,6 +790,9 @@ function pollDictationAfterStop() {
 }
 
 async function autoOpenGoogleDocsIfNeeded() {
+  if (isAuthenticating) {
+    return;
+  }
   if (state.dictation.isDocsPage) {
     return;
   }

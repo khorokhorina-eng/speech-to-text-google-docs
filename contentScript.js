@@ -1563,7 +1563,7 @@ function createRecognition() {
     pendingInterimText = state.interimTranscript;
     if (state.interimTranscript) {
       void syncLiveInterimText(state.interimTranscript);
-      updateLiveTranscriptPreview();
+      removeTranscriptOverlay();
     } else if (!state.transcript) {
       void removeLiveInterimText();
       removeTranscriptOverlay();
