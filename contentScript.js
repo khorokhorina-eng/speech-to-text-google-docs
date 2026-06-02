@@ -786,6 +786,8 @@ let terminalEndState = null;
 let pendingInterimText = "";
 let selectedRecognitionLanguage = "Auto";
 let activeVoiceCommands = buildVoiceCommands(navigator.language || "en-US");
+let pendingReadyCue = false;
+let readyCueAudioContext = null;
 
 function resolveRecognitionLanguage(language) {
   const normalized = typeof language === "string" && language.trim() ? language.trim() : "Auto";
@@ -1407,6 +1409,7 @@ function clearRestartTimer() {
 
 function stopRecognitionInternally(message = "Dictation stopped.") {
   desiredRunning = false;
+  pendingReadyCue = false;
   manualStopMessage = message;
   terminalEndState = null;
   clearRestartTimer();
@@ -1422,6 +1425,43 @@ function stopRecognitionInternally(message = "Dictation stopped.") {
   }
 }
 
+function playReadyChime() {
+  const AudioContextCtor = window.AudioContext || window.webkitAudioContext;
+  if (!AudioContextCtor) {
+    return;
+  }
+
+  try {
+    if (!readyCueAudioContext || readyCueAudioContext.state === "closed") {
+      readyCueAudioContext = new AudioContextCtor();
+    }
+
+    const context = readyCueAudioContext;
+    if (context.state === "suspended") {
+      void context.resume().catch(() => null);
+    }
+
+    const now = context.currentTime;
+    const oscillator = context.createOscillator();
+    const gain = context.createGain();
+
+    oscillator.type = "sine";
+    oscillator.frequency.setValueAtTime(880, now);
+    oscillator.frequency.exponentialRampToValueAtTime(1320, now + 0.08);
+
+    gain.gain.setValueAtTime(0.0001, now);
+    gain.gain.exponentialRampToValueAtTime(0.07, now + 0.012);
+    gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.14);
+
+    oscillator.connect(gain);
+    gain.connect(context.destination);
+    oscillator.start(now);
+    oscillator.stop(now + 0.16);
+  } catch (_error) {
+    // Best effort only.
+  }
+}
+
 function createRecognition() {
   if (!SpeechRecognitionCtor) {
     return null;
@@ -1433,7 +1473,11 @@ function createRecognition() {
   next.lang = resolveRecognitionLanguage(selectedRecognitionLanguage);
 
   next.onstart = () => {
-    setStatus("listening", "Listening with Google speech recognition...");
+    if (pendingReadyCue) {
+      pendingReadyCue = false;
+      playReadyChime();
+    }
+    setStatus("listening", "Microphone is on. Start speaking now.");
   };
 
   next.onresult = (event) => {
@@ -1583,17 +1627,19 @@ async function startDictation(options = {}) {
   }
 
   desiredRunning = true;
+  pendingReadyCue = true;
   manualStopMessage = "Dictation stopped.";
   startSessionTimer();
-  setStatus("starting", "Starting Google speech recognition...");
+  setStatus("starting", "Starting microphone. Wait for the chime before speaking.");
 
   try {
     recognition.start();
   } catch (error) {
     desiredRunning = false;
+    pendingReadyCue = false;
     stopSessionTimer();
     if ((error?.message || "").toLowerCase().includes("already started")) {
-      setStatus("listening", "Listening with Google speech recognition...");
+      setStatus("listening", "Microphone is on. Start speaking now.");
       return {
         started: true,
         alreadyRunning: true,
