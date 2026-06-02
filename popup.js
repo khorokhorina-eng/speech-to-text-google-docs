@@ -2,10 +2,13 @@ const statusEl = document.getElementById("status");
 const hintEl = document.getElementById("hint");
 const docTitleEl = document.getElementById("docTitle");
 const quotaEl = document.getElementById("quota");
+const statusCardEl = document.getElementById("statusCard");
+const languageCardEl = document.getElementById("languageCard");
 const languageSelectEl = document.getElementById("languageSelect");
 const recordingTipsEl = document.getElementById("recordingTips");
 const startBtn = document.getElementById("start");
 const stopBtn = document.getElementById("stop");
+const documentCardEl = document.getElementById("documentCard");
 const upgradeBtn = document.getElementById("upgrade");
 const contactBtn = document.getElementById("contact");
 const accountActionBtn = document.getElementById("accountAction");
@@ -489,6 +492,10 @@ function updateDictationUI() {
   recordingTipsEl?.classList.toggle("hidden", !isRunning);
 
   trialEndedNoticeEl.classList.toggle("hidden", !trialEnded);
+  statusCardEl?.classList.toggle("hidden", trialEnded);
+  languageCardEl?.classList.toggle("hidden", trialEnded);
+  readerControlsEl?.classList.toggle("hidden", trialEnded || !dictation.isDocsPage);
+  documentCardEl?.classList.toggle("hidden", !dictation.isDocsPage && !trialEnded);
 
   if (trialEnded) {
     startBtn.disabled = true;
