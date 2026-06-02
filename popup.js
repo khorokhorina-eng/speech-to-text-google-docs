@@ -6,6 +6,7 @@ const statusCardEl = document.getElementById("statusCard");
 const languageCardEl = document.getElementById("languageCard");
 const languageSelectEl = document.getElementById("languageSelect");
 const recordingTipsEl = document.getElementById("recordingTips");
+const readerControlsEl = document.getElementById("readerControls");
 const startBtn = document.getElementById("start");
 const stopBtn = document.getElementById("stop");
 const actionHintEl = document.getElementById("actionHint");
