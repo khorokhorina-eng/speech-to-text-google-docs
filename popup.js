@@ -228,6 +228,10 @@ function writeStorage(payload) {
 }
 
 async function getReturnUrlForAuth() {
+  const currentPageUrl = typeof state.dictation.pageUrl === "string" ? state.dictation.pageUrl.trim() : "";
+  if (currentPageUrl.startsWith("https://docs.google.com/document/")) {
+    return currentPageUrl;
+  }
   try {
     const result = await sendRuntimeMessage({ type: "getPreferredReturnUrl" });
     const url = result?.returnUrl || "";

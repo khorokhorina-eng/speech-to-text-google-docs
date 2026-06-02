@@ -829,6 +829,7 @@ function sendStateUpdate() {
     type: "dictationStateUpdate",
     state: {
       ...state,
+      pageUrl: location.href,
       docTitle: document.title.replace(/\s*-\s*Google Docs\s*$/, ""),
     },
   });
@@ -1777,6 +1778,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       ok: true,
       state: {
         ...state,
+        pageUrl: location.href,
         docTitle: document.title.replace(/\s*-\s*Google Docs\s*$/, ""),
       },
     });
@@ -1790,6 +1792,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       language: state.language,
       state: {
         ...state,
+        pageUrl: location.href,
         docTitle: document.title.replace(/\s*-\s*Google Docs\s*$/, ""),
       },
     });

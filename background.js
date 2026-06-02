@@ -250,6 +250,11 @@ async function startGoogleSignIn(returnUrl) {
 
 async function getPreferredReturnUrl() {
   const activeTab = await queryActiveTab().catch(() => null);
+  const activeState = activeTab?.id ? tabStateCache.get(activeTab.id) : null;
+  const activeStateUrl = typeof activeState?.pageUrl === "string" ? activeState.pageUrl.trim() : "";
+  if (activeStateUrl.startsWith("https://docs.google.com/document/")) {
+    return activeStateUrl;
+  }
   const activeUrl = typeof activeTab?.url === "string" ? activeTab.url.trim() : "";
   if (activeUrl.startsWith("https://docs.google.com/document/")) {
     return activeUrl;
@@ -257,6 +262,11 @@ async function getPreferredReturnUrl() {
 
   const docsTabs = await queryTabs({ url: "https://docs.google.com/document/*" }).catch(() => []);
   const reusableTab = docsTabs.find((tab) => tab.active) || docsTabs[0] || null;
+  const reusableState = reusableTab?.id ? tabStateCache.get(reusableTab.id) : null;
+  const reusableStateUrl = typeof reusableState?.pageUrl === "string" ? reusableState.pageUrl.trim() : "";
+  if (reusableStateUrl.startsWith("https://docs.google.com/document/")) {
+    return reusableStateUrl;
+  }
   const docsUrl = typeof reusableTab?.url === "string" ? reusableTab.url.trim() : "";
   if (docsUrl.startsWith("https://docs.google.com/document/")) {
     return docsUrl;
@@ -549,6 +559,7 @@ function getDefaultTabState() {
     connected: false,
     supported: false,
     isDocsPage: false,
+    pageUrl: "",
     status: "idle",
     message: "Open a Google Doc and place the text cursor before starting dictation.",
     transcript: "",
@@ -834,6 +845,7 @@ async function getDictationState() {
     ...getDefaultTabState(),
     language: selectedLanguage,
     isDocsPage: typeof tab.url === "string" && tab.url.startsWith("https://docs.google.com/document/"),
+    pageUrl: typeof tab.url === "string" ? tab.url : "",
     docTitle: tab.title || "",
   };
 
