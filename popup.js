@@ -161,6 +161,7 @@ const STATUS_LABELS = {
 };
 
 let docsAutoOpenLastAttemptAt = 0;
+let docsAutoOpenAttempted = false;
 let activeScreen = "reader";
 let isAuthenticating = false;
 let authSuccessToastTimer = null;
@@ -556,9 +557,8 @@ function updateDictationUI() {
     startBtn.disabled = true;
     hintEl.textContent = "Complete Google sign-in in this tab.";
   } else if (!dictation.isDocsPage) {
-    startBtn.disabled = false;
-    hintEl.textContent = "Opening Google Docs...";
-    void autoOpenGoogleDocsIfNeeded();
+    startBtn.disabled = true;
+    hintEl.textContent = "Open a Google Doc to continue dictation.";
   } else if (dictation.status === "starting") {
     hintEl.textContent = "Microphone is on. The first words can take a moment to appear.";
   } else if (dictation.status === "idle" && !dictation.cursorReady) {
@@ -803,9 +803,13 @@ async function autoOpenGoogleDocsIfNeeded() {
   if (state.dictation.isDocsPage) {
     return;
   }
+  if (docsAutoOpenAttempted) {
+    return;
+  }
   if (Date.now() - docsAutoOpenLastAttemptAt < DOCS_AUTO_OPEN_COOLDOWN_MS) {
     return;
   }
+  docsAutoOpenAttempted = true;
   docsAutoOpenLastAttemptAt = Date.now();
   state.dictation.message = "Opening Google Docs...";
   updateUI();
@@ -1060,7 +1064,6 @@ function initializePopup() {
       loadAuthState(),
       loadSubscriptionStatus(),
     ]);
-    await autoOpenGoogleDocsIfNeeded();
   }
 
   window.addEventListener("focus", () => {
@@ -1076,7 +1079,6 @@ function initializePopup() {
 
   void showWelcomeOnFirstLaunch();
   updateUI();
-  void autoOpenGoogleDocsIfNeeded();
   void Promise.all([
     loadTrialExhaustedTrackingState(),
     loadAuthState(),

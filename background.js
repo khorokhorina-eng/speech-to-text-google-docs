@@ -6,6 +6,7 @@ const DEVICE_TOKEN_KEY = "deviceToken";
 const AUTH_SESSION_KEY = "authSession";
 const LOCAL_TRIAL_STATE_KEY = "localTrialState";
 const DICTATION_LANGUAGE_KEY = "dictationLanguage";
+const LAST_DOCS_URL_KEY = "lastDocsUrl";
 const SUBSCRIPTION_CACHE_MS = 30 * 1000;
 
 let subscriptionCache = {
@@ -24,6 +25,34 @@ let pricingPlansCache = {
 };
 
 const tabStateCache = new Map();
+let lastKnownDocsUrl = "";
+
+function normalizeDocsUrl(value) {
+  const url = typeof value === "string" ? value.trim() : "";
+  return url.startsWith("https://docs.google.com/document/") ? url : "";
+}
+
+async function getStoredLastDocsUrl() {
+  if (lastKnownDocsUrl) {
+    return lastKnownDocsUrl;
+  }
+  const result = await readStorage([LAST_DOCS_URL_KEY]);
+  const stored = normalizeDocsUrl(result?.[LAST_DOCS_URL_KEY]);
+  if (stored) {
+    lastKnownDocsUrl = stored;
+  }
+  return stored;
+}
+
+async function rememberDocsUrl(url) {
+  const normalized = normalizeDocsUrl(url);
+  if (!normalized || normalized === lastKnownDocsUrl) {
+    return normalized;
+  }
+  lastKnownDocsUrl = normalized;
+  await writeStorage({ [LAST_DOCS_URL_KEY]: normalized });
+  return normalized;
+}
 
 function normalizePlanDetails(plan, fallbackPlanId = "") {
   if (plan && typeof plan === "object" && !Array.isArray(plan)) {
@@ -249,14 +278,21 @@ async function startGoogleSignIn(returnUrl) {
 }
 
 async function getPreferredReturnUrl() {
+  const rememberedUrl = await getStoredLastDocsUrl();
+  if (rememberedUrl) {
+    return rememberedUrl;
+  }
+
   const activeTab = await queryActiveTab().catch(() => null);
   const activeState = activeTab?.id ? tabStateCache.get(activeTab.id) : null;
   const activeStateUrl = typeof activeState?.pageUrl === "string" ? activeState.pageUrl.trim() : "";
   if (activeStateUrl.startsWith("https://docs.google.com/document/")) {
+    void rememberDocsUrl(activeStateUrl);
     return activeStateUrl;
   }
   const activeUrl = typeof activeTab?.url === "string" ? activeTab.url.trim() : "";
   if (activeUrl.startsWith("https://docs.google.com/document/")) {
+    void rememberDocsUrl(activeUrl);
     return activeUrl;
   }
 
@@ -265,10 +301,12 @@ async function getPreferredReturnUrl() {
   const reusableState = reusableTab?.id ? tabStateCache.get(reusableTab.id) : null;
   const reusableStateUrl = typeof reusableState?.pageUrl === "string" ? reusableState.pageUrl.trim() : "";
   if (reusableStateUrl.startsWith("https://docs.google.com/document/")) {
+    void rememberDocsUrl(reusableStateUrl);
     return reusableStateUrl;
   }
   const docsUrl = typeof reusableTab?.url === "string" ? reusableTab.url.trim() : "";
   if (docsUrl.startsWith("https://docs.google.com/document/")) {
+    void rememberDocsUrl(docsUrl);
     return docsUrl;
   }
 
@@ -818,6 +856,8 @@ async function getDictationState() {
     return defaultState;
   }
 
+  void rememberDocsUrl(defaultState.pageUrl);
+
   try {
     await ensureDocsContentScript(tab.id);
     await sendMessageToTab(tab.id, { type: "setRecognitionLanguage", language: selectedLanguage });
@@ -828,6 +868,7 @@ async function getDictationState() {
       connected: true,
       supported: response.state?.supported !== false,
     };
+    void rememberDocsUrl(nextState.pageUrl || defaultState.pageUrl);
     tabStateCache.set(tab.id, nextState);
     return nextState;
   } catch (_error) {
@@ -878,6 +919,7 @@ async function stopDictation() {
 }
 
 async function openGoogleDocs() {
+  const targetUrl = (await getStoredLastDocsUrl()) || "https://docs.google.com/document/create";
   const existingTabs = await queryTabs({ url: "https://docs.google.com/document/*" }).catch(() => []);
   const reusableTab = existingTabs.find((tab) => tab.active) || existingTabs[0] || null;
 
@@ -888,11 +930,11 @@ async function openGoogleDocs() {
 
   const activeTab = await queryActiveTab().catch(() => null);
   if (activeTab?.id) {
-    await updateTabUrl(activeTab.id, "https://docs.google.com/document/create");
+    await updateTabUrl(activeTab.id, targetUrl);
     return { opened: true, reused: true, tabId: activeTab.id };
   }
 
-  const createdTab = await chrome.tabs.create({ url: "https://docs.google.com/document/create" });
+  const createdTab = await chrome.tabs.create({ url: targetUrl });
   return { opened: true, reused: false, tabId: createdTab?.id || null };
 }
 
@@ -907,10 +949,14 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
   if (message.type === "dictationStateUpdate") {
     if (sender.tab?.id) {
-      tabStateCache.set(sender.tab.id, {
+      const nextState = {
         ...getDefaultTabState(),
         ...(message.state || {}),
         connected: true,
+      };
+      void rememberDocsUrl(nextState.pageUrl);
+      tabStateCache.set(sender.tab.id, {
+        ...nextState,
       });
     }
     sendResponse({ ok: true });
@@ -1039,20 +1085,6 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       .then((result) => sendResponse({ ok: true, ...result }))
       .catch((error) =>
         sendResponse({ ok: false, error: error.message || "Failed to type text into Google Docs." })
-      );
-    return true;
-  }
-
-  if (message.type === "nativeDeleteText") {
-    if (!sender.tab?.id) {
-      sendResponse({ ok: false, error: "No Google Docs tab is attached to this request." });
-      return false;
-    }
-
-    nativeDeleteTextInTab(sender.tab.id, sender.tab.windowId, message.count)
-      .then((result) => sendResponse({ ok: true, ...result }))
-      .catch((error) =>
-        sendResponse({ ok: false, error: error.message || "Failed to delete text in Google Docs." })
       );
     return true;
   }
