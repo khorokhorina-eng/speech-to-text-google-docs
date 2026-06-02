@@ -793,6 +793,9 @@ async function autoOpenGoogleDocsIfNeeded() {
   if (isAuthenticating) {
     return;
   }
+  if (activeScreen !== "reader") {
+    return;
+  }
   if (state.dictation.isDocsPage) {
     return;
   }
