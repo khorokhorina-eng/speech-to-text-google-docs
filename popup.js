@@ -212,13 +212,16 @@ async function getReturnUrlForAuth() {
   try {
     const tabs = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
     const url = tabs?.[0]?.url || "";
-    if (typeof url === "string" && url.startsWith("https://")) {
+    if (
+      typeof url === "string" &&
+      (url.startsWith("https://docs.google.com/document/") || url.startsWith("https://docs.google.com/document/create"))
+    ) {
       return url;
     }
   } catch (_error) {
     // Fall through.
   }
-  return chrome.runtime.getURL("paywall.html");
+  return "https://docs.google.com/document/create";
 }
 
 function getPlanLabel(plan) {

@@ -25,6 +25,10 @@ let currentSubscription = { active: false, plan: null };
 let authState = { signedIn: false, email: "", method: null };
 let pricingPlans = [];
 
+function getSafeReturnUrl() {
+  return "https://docs.google.com/document/create";
+}
+
 function getPlanLabel(plan) {
   const planId = plan?.planId || "";
   if (planId === "annual") {
@@ -151,7 +155,7 @@ async function signInWithGoogle() {
   try {
     await sendMessage({
       type: "startGoogleSignIn",
-      returnUrl: chrome.runtime.getURL("paywall.html"),
+      returnUrl: getSafeReturnUrl(),
     });
     setStatus("Complete Google sign-in in the opened tab, then refresh this page.");
   } catch (error) {
@@ -197,7 +201,7 @@ async function openCheckout(planId, button) {
     const result = await sendMessage({
       type: "createCheckoutSession",
       planId,
-      returnUrl: chrome.runtime.getURL("paywall.html"),
+      returnUrl: getSafeReturnUrl(),
     });
 
     if (!result.url) {
