@@ -89,9 +89,23 @@ async function configureSidePanelBehavior() {
   }
 }
 
-void configureSidePanelBehavior();
+async function configureUninstallUrl() {
+  if (!chrome.runtime?.setUninstallURL) {
+    return;
+  }
 
-chrome.runtime.setUninstallURL?.(UNINSTALL_URL).catch(() => {});
+  try {
+    const maybePromise = chrome.runtime.setUninstallURL(UNINSTALL_URL);
+    if (maybePromise && typeof maybePromise.then === "function") {
+      await maybePromise;
+    }
+  } catch (_error) {
+    // Best effort only.
+  }
+}
+
+void configureSidePanelBehavior();
+void configureUninstallUrl();
 
 function isRemoteConfigured() {
   return Boolean(REMOTE_API_BASE_URL) && !/your-domain\.com/i.test(REMOTE_API_BASE_URL);
@@ -99,6 +113,7 @@ function isRemoteConfigured() {
 
 chrome.runtime.onInstalled.addListener((details) => {
   void configureSidePanelBehavior();
+  void configureUninstallUrl();
   if (details.reason !== "install") {
     return;
   }
@@ -111,6 +126,21 @@ chrome.runtime.onInstalled.addListener((details) => {
 
 chrome.runtime.onStartup?.addListener(() => {
   void configureSidePanelBehavior();
+  void configureUninstallUrl();
+});
+
+chrome.action?.onClicked.addListener((tab) => {
+  if (!chrome.sidePanel?.open) {
+    return;
+  }
+
+  const tabId = Number(tab?.id);
+  const windowId = Number(tab?.windowId);
+  if (!Number.isFinite(tabId) || !Number.isFinite(windowId)) {
+    return;
+  }
+
+  void chrome.sidePanel.open({ tabId, windowId }).catch(() => {});
 });
 
 function readStorage(keys) {
