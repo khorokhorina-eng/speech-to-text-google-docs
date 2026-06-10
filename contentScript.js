@@ -790,6 +790,7 @@ let pendingReadyCue = false;
 let readyCueAudioContext = null;
 let liveInterimInsertedText = "";
 let liveInterimRevision = 0;
+let liveInterimOperation = Promise.resolve();
 
 function resolveRecognitionLanguage(language) {
   const normalized = typeof language === "string" && language.trim() ? language.trim() : "Auto";
@@ -1357,13 +1358,22 @@ async function insertTextIntoGoogleDocs(text, rawText = "") {
   return insertTextIntoDocument(normalizedTranscript, rawText);
 }
 
-async function removeLiveInterimText() {
+function queueLiveInterimOperation(task) {
+  const nextOperation = liveInterimOperation.then(task, task);
+  liveInterimOperation = nextOperation.catch(() => null);
+  return nextOperation;
+}
+
+function drainLiveInterimOperations() {
+  return liveInterimOperation.catch(() => null);
+}
+
+async function performRemoveLiveInterimText() {
   const current = liveInterimInsertedText;
   if (!current) {
     return true;
   }
 
-  liveInterimRevision += 1;
   liveInterimInsertedText = "";
 
   try {
@@ -1377,35 +1387,60 @@ async function removeLiveInterimText() {
   }
 }
 
-async function syncLiveInterimText(text) {
+function removeLiveInterimText() {
+  liveInterimRevision += 1;
+  return queueLiveInterimOperation(() => performRemoveLiveInterimText());
+}
+
+function syncLiveInterimText(text) {
   const normalizedTranscript = normalizeTranscriptChunk(text);
   const nextText = normalizedTranscript ? `${normalizedTranscript} ` : "";
   const revision = liveInterimRevision + 1;
   liveInterimRevision = revision;
 
   if (nextText === liveInterimInsertedText) {
-    return;
+    return Promise.resolve();
   }
 
-  if (liveInterimInsertedText) {
-    await removeLiveInterimText().catch(() => null);
-  }
-
-  if (!nextText) {
-    return;
-  }
-
-  try {
-    const response = await sendRuntimeMessage({
-      type: "nativeTypeText",
-      text: nextText,
-    });
-    if (response?.inserted && liveInterimRevision === revision) {
-      liveInterimInsertedText = nextText;
+  return queueLiveInterimOperation(async () => {
+    if (liveInterimRevision !== revision) {
+      return;
     }
-  } catch (_error) {
-    // Best effort only. Final insertion path remains authoritative.
-  }
+
+    if (liveInterimInsertedText) {
+      await performRemoveLiveInterimText().catch(() => null);
+    }
+
+    if (!nextText || liveInterimRevision !== revision) {
+      return;
+    }
+
+    try {
+      const response = await sendRuntimeMessage({
+        type: "nativeTypeText",
+        text: nextText,
+      });
+      if (!response?.inserted) {
+        return;
+      }
+
+      if (liveInterimRevision !== revision) {
+        try {
+          await sendRuntimeMessage({
+            type: "nativeDeleteText",
+            count: Array.from(nextText).length,
+          });
+        } catch (_error) {
+          // Best effort only. Final insertion path remains authoritative.
+        }
+        return;
+      }
+
+      liveInterimInsertedText = nextText;
+    } catch (_error) {
+      // Best effort only. Final insertion path remains authoritative.
+    }
+  });
 }
 
 async function handleRecognizedText(text) {
@@ -1420,6 +1455,7 @@ async function handleRecognizedText(text) {
   }
 
   liveInterimRevision += 1;
+  await drainLiveInterimOperations();
   await removeLiveInterimText().catch(() => null);
   const inserted = await insertTextIntoGoogleDocs(normalizedTranscript, text);
   if (!inserted) {
@@ -1459,14 +1495,16 @@ function queueRecognizedText(text) {
 function flushPendingInterimText() {
   const pending = normalizeTranscriptChunk(pendingInterimText || state.interimTranscript || "");
   liveInterimRevision += 1;
-  void removeLiveInterimText();
+  const clearInterim = drainLiveInterimOperations()
+    .then(() => removeLiveInterimText())
+    .catch(() => null);
   pendingInterimText = "";
   state.interimTranscript = "";
   sendStateUpdate();
   if (!pending) {
-    return Promise.resolve();
+    return clearInterim;
   }
-  return queueRecognizedText(pending);
+  return clearInterim.then(() => queueRecognizedText(pending));
 }
 
 function clearRestartTimer() {
