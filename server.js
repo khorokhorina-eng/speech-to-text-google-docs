@@ -51,6 +51,10 @@ const STRIPE_MONTHLY_PRICE_ID =
   process.env.STRIPE_MONTHLY_PRICE_ID || process.env.STRIPE_PRICE_MONTHLY || "";
 const STRIPE_ANNUAL_PRICE_ID =
   process.env.STRIPE_YEARLY_PRICE_ID || process.env.STRIPE_PRICE_ANNUAL || "";
+const PRODUCT_SLUG = "speech_to_text_google_docs";
+const APP_STRIPE_PRICE_IDS = new Set(
+  [STRIPE_MONTHLY_PRICE_ID, STRIPE_ANNUAL_PRICE_ID].filter(Boolean)
+);
 
 const GOOGLE_OAUTH_CLIENT_ID = process.env.GOOGLE_OAUTH_CLIENT_ID || "";
 const GOOGLE_OAUTH_CLIENT_SECRET = process.env.GOOGLE_OAUTH_CLIENT_SECRET || "";
@@ -525,6 +529,42 @@ function getPlanById(planId) {
 
 function getPlanByStripePriceId(priceId) {
   return PLAN_DEFINITIONS.find((plan) => plan.stripePriceId === priceId) || null;
+}
+
+function isRelevantStripePriceId(priceId) {
+  return Boolean(priceId) && APP_STRIPE_PRICE_IDS.has(String(priceId));
+}
+
+function subscriptionBelongsToThisProduct(subscription) {
+  if (!subscription || typeof subscription !== "object") {
+    return false;
+  }
+  if (subscription.metadata?.productSlug === PRODUCT_SLUG) {
+    return true;
+  }
+  return Boolean(
+    subscription.items?.data?.some((item) => isRelevantStripePriceId(item?.price?.id || ""))
+  );
+}
+
+async function checkoutSessionBelongsToThisProduct(session) {
+  if (!session || typeof session !== "object") {
+    return false;
+  }
+  if (
+    session.metadata?.productSlug === PRODUCT_SLUG ||
+    session.subscription_details?.metadata?.productSlug === PRODUCT_SLUG
+  ) {
+    return true;
+  }
+  if (isRelevantStripePriceId(session.line_items?.data?.[0]?.price?.id || "")) {
+    return true;
+  }
+  if (!stripe || !session.id) {
+    return false;
+  }
+  const lineItems = await stripe.checkout.sessions.listLineItems(session.id, { limit: 10 });
+  return Boolean(lineItems.data?.some((item) => isRelevantStripePriceId(item?.price?.id || "")));
 }
 
 function formatCurrencyAmount(amountCents, currency = "usd") {
@@ -1054,14 +1094,15 @@ async function lookupSubscriptionStatusForAccount(state, account) {
     };
   }
 
-  const activeSub = subscriptions.data.find(
+  const relevantSubscriptions = subscriptions.data.filter(subscriptionBelongsToThisProduct);
+  const activeSub = relevantSubscriptions.find(
     (sub) => sub.status === "active" || sub.status === "trialing"
   );
 
   if (!activeSub) {
     return {
       active: false,
-      status: subscriptions.data[0]?.status || "none",
+      status: relevantSubscriptions[0]?.status || "none",
       plan: null,
       customerId,
       email: account.email,
@@ -1521,6 +1562,7 @@ async function handleCreateCheckoutSession(req, res, parsedUrl) {
         email: account.email,
         deviceToken,
         planId: selectedPlan.id,
+        productSlug: PRODUCT_SLUG,
       },
       allow_promotion_codes: true,
       subscription_data: {
@@ -1529,6 +1571,7 @@ async function handleCreateCheckoutSession(req, res, parsedUrl) {
           email: account.email,
           deviceToken,
           planId: selectedPlan.id,
+          productSlug: PRODUCT_SLUG,
         },
       },
     });
@@ -1898,6 +1941,11 @@ async function handleStripeWebhook(req, res) {
   try {
     if (event.type === "checkout.session.completed") {
       const session = event.data.object;
+      const belongsToThisProduct = await checkoutSessionBelongsToThisProduct(session);
+      if (!belongsToThisProduct) {
+        sendJson(res, 200, { received: true, ignored: true });
+        return;
+      }
       const accountId =
         session.client_reference_id ||
         session.metadata?.accountId ||
@@ -1936,6 +1984,10 @@ async function handleStripeWebhook(req, res) {
       event.type === "customer.subscription.deleted"
     ) {
       const sub = event.data.object;
+      if (!subscriptionBelongsToThisProduct(sub)) {
+        sendJson(res, 200, { received: true, ignored: true });
+        return;
+      }
       const customerId = typeof sub.customer === "string" ? sub.customer : "";
       const accountId = sub.metadata?.accountId || state.customerToAccount?.[customerId] || "";
       rememberAccountCustomer(state, accountId, customerId);
