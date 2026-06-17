@@ -791,6 +791,7 @@ let readyCueAudioContext = null;
 let liveInterimInsertedText = "";
 let liveInterimRevision = 0;
 let liveInterimOperation = Promise.resolve();
+const INSERT_INTERIM_IN_DOCUMENT = false;
 
 function resolveRecognitionLanguage(language) {
   const normalized = typeof language === "string" && language.trim() ? language.trim() : "Auto";
@@ -823,6 +824,16 @@ function sendRuntimeMessage(message) {
       }
       resolve(response);
     });
+  });
+}
+
+function trackAnalyticsEvent(name, params = {}) {
+  return chrome.runtime.sendMessage({
+    type: "trackAnalyticsEvent",
+    name,
+    params,
+  }, () => {
+    void chrome.runtime.lastError;
   });
 }
 
@@ -1454,11 +1465,22 @@ async function handleRecognizedText(text) {
     return;
   }
 
+  trackAnalyticsEvent("transcription_completed", {
+    chars: Array.from(normalizedTranscript).length,
+    session_seconds: Number(state.sessionSeconds || 0),
+    cursor_ready: state.cursorReady,
+  });
+
   liveInterimRevision += 1;
   await drainLiveInterimOperations();
   await removeLiveInterimText().catch(() => null);
   const inserted = await insertTextIntoGoogleDocs(normalizedTranscript, text);
   if (!inserted) {
+    trackAnalyticsEvent("transcription_insert_failed", {
+      chars: Array.from(normalizedTranscript).length,
+      session_seconds: Number(state.sessionSeconds || 0),
+      cursor_ready: state.cursorReady,
+    });
     state.transcript = `${state.transcript} ${normalizedTranscript}`.trim();
     state.insertedChars += normalizedTranscript.length;
     state.interimTranscript = "";
@@ -1475,6 +1497,11 @@ async function handleRecognizedText(text) {
   state.insertedChars += normalizedTranscript.length;
   state.interimTranscript = "";
   insertionHistory.push(normalizedTranscript);
+  trackAnalyticsEvent("transcription_inserted", {
+    chars: Array.from(normalizedTranscript).length,
+    session_seconds: Number(state.sessionSeconds || 0),
+    cursor_ready: state.cursorReady,
+  });
   setStatus(
     desiredRunning ? "listening" : "idle",
     desiredRunning
@@ -1607,11 +1634,13 @@ function createRecognition() {
     state.interimTranscript = interim.trim();
     pendingInterimText = state.interimTranscript;
     if (state.interimTranscript) {
-      void syncLiveInterimText(state.interimTranscript);
-      removeTranscriptOverlay();
+      if (INSERT_INTERIM_IN_DOCUMENT) {
+        void syncLiveInterimText(state.interimTranscript);
+      }
     } else if (!state.transcript) {
-      void removeLiveInterimText();
-      removeTranscriptOverlay();
+      if (INSERT_INTERIM_IN_DOCUMENT) {
+        void removeLiveInterimText();
+      }
     }
     sendStateUpdate();
   };

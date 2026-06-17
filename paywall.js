@@ -25,6 +25,28 @@ let currentSubscription = { active: false, plan: null };
 let authState = { signedIn: false, email: "", method: null };
 let pricingPlans = [];
 
+function getPaywallPresentation(subscription) {
+  if (subscription?.active) {
+    return {
+      title: "Subscription active",
+      subtitle: "Manage your plan for Google Docs dictation.",
+    };
+  }
+  const sessionsLeft = Number.isFinite(Number(subscription?.sessionsLeft))
+    ? Math.max(0, Math.floor(Number(subscription.sessionsLeft)))
+    : 0;
+  if (sessionsLeft <= 0) {
+    return {
+      title: "Your trial is over",
+      subtitle: "Keep dictating in Google Docs without limits.",
+    };
+  }
+  return {
+    title: "Choose a dictation plan",
+    subtitle: `${sessionsLeft} ${sessionsLeft === 1 ? "dictation" : "dictations"} left in trial out of 10 free dictations.`,
+  };
+}
+
 async function getSafeReturnUrl() {
   try {
     const result = await sendMessage({ type: "getPreferredReturnUrl" });
@@ -265,21 +287,23 @@ async function loadSubscriptionStatus() {
   try {
     await loadAuthState();
     const result = await sendMessage({ type: "refreshSubscriptionStatus" });
-    currentSubscription = result || { active: false, plan: null };
+    currentSubscription = result || { active: false, plan: null, sessionsLeft: null };
     updateButtons();
     managePanelEl.hidden = !currentSubscription.active;
     monthlyPlanCardEl.hidden = currentSubscription.active;
     annualPlanCardEl.hidden = currentSubscription.active;
     const pageTitleEl = document.querySelector("h1");
     const pageSubtitleEl = document.querySelector(".muted");
+    const paywallPresentation = getPaywallPresentation(currentSubscription);
+
+    if (pageTitleEl) {
+      pageTitleEl.textContent = paywallPresentation.title;
+    }
+    if (pageSubtitleEl) {
+      pageSubtitleEl.textContent = paywallPresentation.subtitle;
+    }
 
     if (currentSubscription.active) {
-      if (pageTitleEl) {
-        pageTitleEl.textContent = "Subscription active";
-      }
-      if (pageSubtitleEl) {
-        pageSubtitleEl.textContent = "Manage your plan for Google Docs dictation.";
-      }
       const endLabel = formatPlanDateLabel(currentSubscription.plan?.currentPeriodEnd);
       manageMessageEl.textContent =
         currentSubscription.plan?.cancelAtPeriodEnd && endLabel
@@ -287,13 +311,6 @@ async function loadSubscriptionStatus() {
           : endLabel
           ? `Your ${getPlanLabel(currentSubscription.plan).toLowerCase()} renews on ${endLabel}.`
           : "Your paid plan is active on this account.";
-    } else {
-      if (pageTitleEl) {
-        pageTitleEl.textContent = "Your trial is over";
-      }
-      if (pageSubtitleEl) {
-        pageSubtitleEl.textContent = "Keep dictating in Google Docs without limits.";
-      }
     }
 
     if (currentSubscription.active) {
